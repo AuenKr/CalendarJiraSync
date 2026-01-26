@@ -94,7 +94,7 @@ export interface MessageRequest {
     | CreateIssuePayload 
     | UpdateIssueDescriptionPayload
     | GetIssuePayload
-    | {}
+    | Record<string, never>
 }
 
 export interface SearchIssuesResponse {

@@ -77,6 +77,8 @@ export const scrapeEvents = (): CalendarEvent[] => {
   return Array.from(uniqueEvents.values())
 }
 
+type EventData = (string | null | number | EventData)[]
+
 export const fetchEventDescription = async (eventId: string): Promise<string | undefined> => {
   try {
     // Decode the event ID if it looks like base64 (common in GCal)
@@ -124,13 +126,13 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
         try {
           const decoded = atob(eventId)
           realId = decoded.split(' ')[0]
-        } catch (e) {
+        } catch {
           // If not base64, use as is
         }
         
         // console.log(`[Jira Sync] Searching for event ID: ${realId} in initialdata`)
         
-        const findEvent = (data: any, id: string): any => {
+        const findEvent = (data: unknown, id: string): unknown => {
           if (!data || typeof data !== 'object') return null
           
           if (Array.isArray(data)) {
@@ -145,7 +147,7 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
           return null
         }
         
-        const eventData = findEvent(initialData, realId)
+        const eventData = findEvent(initialData, realId) as EventData | null
         if (eventData) {
           // Description is typically at index 64 or around there, wrapped in [null, "Description"]
           // We search for an array [null, string] in the event data

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects } from '../lib/jira'
+import { syncData, getProjects, type JiraProject } from '../lib/jira'
 import { Save, CheckCircle, ExternalLink, RefreshCw, ArrowRight, Layers, Search } from 'lucide-react'
 
 function App() {
@@ -60,11 +60,11 @@ function App() {
   }
 
   const filteredProjects = projects
-    .filter((p: any) => 
+    .filter((p: JiraProject) => 
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       p.key.toLowerCase().includes(searchQuery.toLowerCase())
     )
-    .sort((a: any, b: any) => {
+    .sort((a: JiraProject, b: JiraProject) => {
       const aSelected = selectedProjectKeys.includes(a.key)
       const bSelected = selectedProjectKeys.includes(b.key)
       if (aSelected && !bSelected) return -1
@@ -173,7 +173,7 @@ function App() {
               {filteredProjects.length === 0 && (
                 <p className="text-center text-gray-500 text-sm py-4">No spaces found</p>
               )}
-              {filteredProjects.map((project: any) => (
+              {filteredProjects.map((project: JiraProject) => (
                 <div 
                   key={project.key}
                   onClick={() => toggleProject(project.key)}

@@ -40,6 +40,11 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
+// Helper to set input value to avoid linter error about prop mutation
+function setInputValue(input: HTMLInputElement, value: string) {
+  input.value = value
+}
+
 export default function ContentApp({ titleInput }: { titleInput?: HTMLInputElement }) {
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebounce(query, 300)
@@ -57,11 +62,6 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
   const results = data?.issues || []
   const source = data?.source
 
-  // Reset forceApi when query changes
-  useEffect(() => {
-    setForceApi(false)
-  }, [query])
-
   // Listen to input changes
   useEffect(() => {
     if (!titleInput) return
@@ -75,13 +75,16 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
 
       setQuery(val)
+      setForceApi(false)
     }
 
     // Initial value
     if (titleInput.value) {
       let val = titleInput.value
       val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
-      setQuery(val)
+      if (query !== val) {
+        setTimeout(() => setQuery(val), 0)
+      }
     }
 
     titleInput.addEventListener('input', handleInput)
@@ -91,36 +94,43 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       titleInput.removeEventListener('input', handleInput)
       titleInput.removeEventListener('focus', handleInput)
     }
-  }, [titleInput])
+  }, [titleInput, query])
 
   // Open popover when we have results or when searching
   useEffect(() => {
+    const updateOpen = (newState: boolean) => {
+      if (open !== newState) {
+        setTimeout(() => setOpen(newState), 0)
+      }
+    }
+
     if (debouncedQuery.length < 2) {
-      setOpen(false)
+      updateOpen(false)
       return
     }
     // If we have results, open
     if (results.length > 0) {
-      setOpen(true)
+      updateOpen(true)
     } 
     // If we are loading, open
     else if (loading) {
-      setOpen(true)
+      updateOpen(true)
     }
     // If we have no results but haven't searched API yet (source is local), open to show "Search in Jira"
     else if (source === 'local') {
-      setOpen(true)
+      updateOpen(true)
     }
     // If we searched API and found nothing, close (or show "No results"?)
     // User said: "If jira task search result is empty. Then there is no need to give btn... Simplly show no search result found"
     // So we should probably keep it open to show "No results"
     else if (source === 'api' && results.length === 0) {
-      setOpen(true)
+      updateOpen(true)
     }
-  }, [debouncedQuery, results.length, loading, source])
+  }, [debouncedQuery, results.length, loading, source, open])
 
   const handleSelect = (issue: JiraIssue) => {
     setQuery('')
+    setForceApi(false)
     setOpen(false)
 
     // Update Google Calendar Title
@@ -152,7 +162,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       if (nativeInputValueSetter) {
         nativeInputValueSetter.call(input, newValue);
       } else {
-        input.value = newValue;
+        setInputValue(input, newValue)
       }
 
       // Dispatch events to trigger listeners

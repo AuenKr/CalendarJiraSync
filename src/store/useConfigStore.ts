@@ -1,17 +1,18 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { chromeStorage } from './storage'
+import type { Project } from 'jira.js/out/version3/models'
 
 interface ConfigState {
   jiraDomain: string
   email: string
   apiToken: string
   selectedProjectKeys: string[]
-  projects: any[]
+  projects: Project[]
   lastLoggedTime: string | null
   setConfig: (config: { jiraDomain: string; email: string; apiToken: string }) => void
   toggleProject: (projectKey: string) => void
-  setProjects: (projects: any[]) => void
+  setProjects: (projects: Project[]) => void
   setLastLoggedTime: (time: string) => void
   isConfigured: () => boolean
 }

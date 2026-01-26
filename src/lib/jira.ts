@@ -32,7 +32,7 @@ export interface SearchResult {
 }
 
 // Helper to send message to background script
-const sendToBackground = async <T>(type: MessageType, payload: any): Promise<T> => {
+const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise<T> => {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type, payload }, (response) => {
       if (chrome.runtime.lastError) {

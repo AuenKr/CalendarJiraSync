@@ -1,5 +1,6 @@
 
 import { Version3Client } from "jira.js"
+import type { Issue, Project, SearchResults } from "jira.js/out/version3/models"
 import type {
   MessageRequest,
   SearchIssuesPayload,
@@ -60,6 +61,11 @@ async function getClient() {
 
 /* ----------------------------- SYNC CORE ----------------------------- */
 
+interface EnhancedSearchResults extends SearchResults {
+  nextPageToken?: string
+  isLast?: boolean
+}
+
 async function syncData() {
   const client = await getClient()
   const config = await getConfig()
@@ -67,7 +73,7 @@ async function syncData() {
   const myself = await client.myself.getCurrentUser()
   const selectedProjectKeys: string[] = config.selectedProjectKeys || []
 
-  let issues: any[] = []
+  let issues: Issue[] = []
 
   if (selectedProjectKeys.length) {
     // JQL: (project in (KEY1, KEY2) OR assignee = currentUser()) AND updated >= -30d ORDER BY updated DESC
@@ -82,14 +88,14 @@ async function syncData() {
         fields: ["summary", "parent", "status", "project"],
         maxResults: 100,
         nextPageToken,
-      }) as any
+      }) as EnhancedSearchResults
 
       if (res.issues) {
         issues = [...issues, ...res.issues]
       }
 
       nextPageToken = res.nextPageToken
-      isLast = res.isLast ?? (res.issues?.length < 100)
+      isLast = res.isLast ?? (res.issues ? res.issues.length < 100 : true)
     } while (!isLast && nextPageToken)
 
   } else {
@@ -197,7 +203,7 @@ async function handleMessage(request: MessageRequest) {
 
     case "GET_PROJECTS": {
       const client = await getClient()
-      let allProjects: any[] = []
+      let allProjects: Project[] = []
       let isLast = false
       let startAt = 0
       const maxResults = 50
@@ -315,7 +321,7 @@ async function handleMessage(request: MessageRequest) {
         fields: ["description"]
       })
       
-      let newContent: any[] = []
+      let newContent: Record<string, unknown>[] = []
       
       if (currentIssue.fields.description) {
          // If it's ADF (object)

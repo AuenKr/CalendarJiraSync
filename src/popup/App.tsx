@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, addWorklog, updateIssueDescription } from '../lib/jira'
+import { syncData, getProjects, addWorklog, updateIssueDescription, type JiraProject } from '../lib/jira'
 import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
@@ -11,7 +11,7 @@ function App() {
   const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTime, setLastLoggedTime } = useConfigStore()
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
-  const [filteredProjects, setFilteredProjects] = useState<any[]>([])
+  const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
   const [loggingTime, setLoggingTime] = useState(false)
   const [logResult, setLogResult] = useState<string>('')
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -168,9 +168,10 @@ function App() {
           setLastLoggedTime(new Date().toISOString())
         }
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      if (e.message && e.message.includes('Receiving end does not exist')) {
+      const err = e as Error
+      if (err.message && err.message.includes('Receiving end does not exist')) {
         setLogResult('Please refresh the Calendar page')
       } else {
         setLogResult('Failed. Refresh Calendar page.')
@@ -280,7 +281,7 @@ function App() {
                 <div className="text-center py-4 text-gray-500 text-xs">Loading projects...</div>
               ) : filteredProjects.length > 0 ? (
                 <div className="space-y-2 max-h-24 overflow-y-auto pr-1 custom-scrollbar">
-                  {filteredProjects.map((project: any) => {
+                  {filteredProjects.map((project: JiraProject) => {
                     const isSelected = (selectedProjectKeys || []).includes(project.key)
                     return (
                       <button 
