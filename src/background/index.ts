@@ -122,7 +122,10 @@ async function handleMessage(request: MessageRequest) {
       const { query } = payload as SearchIssuesPayload
 
       // General search: not restricted to selected projects or assignee
-      const jql = `(summary ~ "${query}" OR key = "${query}") ORDER BY updated DESC`
+      const isKey = /^[A-Z][A-Z0-9]+-\d+$/.test(query)
+      const jql = isKey 
+        ? `(summary ~ "${query}" OR key = "${query}") ORDER BY updated DESC`
+        : `summary ~ "${query}" ORDER BY updated DESC`
 
       const res =
         await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({

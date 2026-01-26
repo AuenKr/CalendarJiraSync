@@ -71,8 +71,8 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       let val = target.value
 
       // Strip existing Jira Key from query if present
-      // Matches [KEY-123] or KEY-123 at start
-      val = val.replace(/^\[?[A-Z]+-\d+\]?\s*/, '')
+      // Only strip if it matches the extension's format [KEY-123]
+      val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
 
       setQuery(val)
     }
@@ -80,7 +80,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
     // Initial value
     if (titleInput.value) {
       let val = titleInput.value
-      val = val.replace(/^\[?[A-Z]+-\d+\]?\s*/, '')
+      val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
       setQuery(val)
     }
 
