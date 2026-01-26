@@ -1,6 +1,9 @@
 
-## 2026-01-26 - UI Text Update
+## 2026-01-26 - Date Picker Implementation
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Updated Log Message**: Changed the success message in `src/popup/App.tsx` from "Logged X tasks" to "Log for X Event(s)" to match user preference.
+- **Added Date Picker**: Replaced the native date input with a `Calendar` component from `shadcn/ui` (using `react-day-picker` and `date-fns`).
+  - Created `src/components/ui/calendar.tsx`.
+  - Updated `src/popup/App.tsx` to use `Popover` + `Calendar` for date selection.
+  - Fixed `react-day-picker` v9 API changes (replaced `IconLeft`/`IconRight` with `Chevron`).
 - **Build**: Verified build passes with `bun run build`.
 ---
