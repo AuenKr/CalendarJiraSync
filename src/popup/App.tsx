@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
 import { syncData, getProjects, addWorklog, updateIssueDescription } from '../lib/jira'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar as CalendarIcon } from 'lucide-react'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { cn } from '@/lib/utils'
-import { format } from 'date-fns'
 import type { CalendarEvent } from '@/types/messages'
 
 function App() {
@@ -19,7 +14,7 @@ function App() {
   const [filteredProjects, setFilteredProjects] = useState<any[]>([])
   const [loggingTime, setLoggingTime] = useState(false)
   const [logResult, setLogResult] = useState<string>('')
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date())
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
 
   const handleLogTime = async () => {
     setLoggingTime(true)
@@ -49,7 +44,7 @@ function App() {
       let errors = 0
       
       // Filter events by selected date
-      const targetDate = selectedDate || new Date()
+      const targetDate = new Date(selectedDate)
       const targetDateStr = targetDate.toDateString() // "Sun Jan 25 2026"
 
       // Deduplicate events by ID to avoid multiple API calls for the same event
@@ -327,35 +322,19 @@ function App() {
             <div className="w-full pt-2 border-t border-gray-700 space-y-2">
                <div className="flex items-center gap-2">
                  <span className="text-xs text-gray-400">Log Date:</span>
-                 <Popover>
-                   <PopoverTrigger asChild>
-                     <Button
-                       variant={"outline"}
-                       className={cn(
-                         "h-8 w-full justify-start text-left font-normal bg-gray-900/50 border-gray-700 text-xs flex-1 hover:bg-gray-800 hover:text-white",
-                         !selectedDate && "text-muted-foreground"
-                       )}
-                     >
-                       <CalendarIcon className="mr-2 h-3 w-3" />
-                       {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
-                     </Button>
-                   </PopoverTrigger>
-                   <PopoverContent className="w-auto p-0" align="start">
-                     <Calendar
-                       mode="single"
-                       selected={selectedDate}
-                       onSelect={setSelectedDate}
-                       initialFocus
-                     />
-                   </PopoverContent>
-                 </Popover>
+                 <Input 
+                   type="date" 
+                   value={selectedDate}
+                   onChange={(e) => setSelectedDate(e.target.value)}
+                   className="h-8 bg-gray-900/50 border-gray-700 text-xs flex-1"
+                 />
                </div>
                <button
                 onClick={handleLogTime}
                 disabled={loggingTime}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <CalendarIcon size={16} className={loggingTime ? "animate-pulse" : ""} />
+                <Calendar size={16} className={loggingTime ? "animate-pulse" : ""} />
                 {loggingTime ? 'Logging Time...' : 'Log Time'}
               </button>
               {lastLoggedTime && (
