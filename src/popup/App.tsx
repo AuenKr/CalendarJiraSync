@@ -233,15 +233,15 @@ function App() {
 
   return (
     <div className="w-80 bg-gray-900 text-white p-4 max-h-[500px] overflow-y-auto">
-      <header className="flex justify-between items-center mb-6">
-        <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+      <header className="flex justify-between items-center mb-4">
+        <h1 className="text-lg font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
           Calendar Jira Sync
         </h1>
         <button 
           onClick={openSetup}
           className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white"
         >
-          <Settings size={20} />
+          <Settings size={18} />
         </button>
       </header>
 

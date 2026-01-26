@@ -1,7 +1,8 @@
 
-## 2026-01-26 - Match Google Calendar Dark Theme
+## 2026-01-26 - UI Spacing Adjustments
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Updated Theme Colors**: Modified `src/index.css` to use `#131314` for dark mode background/popover colors, matching Google Calendar's dark theme exactly as requested.
-- **Refactored Content App**: Updated `src/content/ContentApp.tsx` to use semantic Tailwind classes (e.g., `bg-popover`, `text-foreground`, `border-border`) instead of hardcoded dark mode overrides. This ensures the component correctly inherits the theme variables defined in `src/index.css`.
+- **Reduced Header Spacing**: Updated `src/popup/App.tsx` to reduce the bottom margin of the header from `mb-6` to `mb-4`.
+- **Smaller Header Text**: Reduced the font size of the extension title from `text-xl` to `text-lg` and the settings icon from `size={20}` to `size={18}`.
+- **Goal**: These changes save vertical space, ensuring the log result message is visible without scrolling.
 - **Build**: Verified build passes with `bun run build`.
 ---
