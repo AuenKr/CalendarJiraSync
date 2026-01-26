@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Jira Calendar Sync",
+  "version": "1.0.0",
+  "description": "Sync Jira tasks with Google Calendar",
+  "permissions": ["storage"],
+  "host_permissions": ["https://*.atlassian.net/*", "https://calendar.google.com/*"],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Jira Sync"
+  },
+  "options_page": "setup.html",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["https://calendar.google.com/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
