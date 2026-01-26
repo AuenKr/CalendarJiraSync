@@ -126,23 +126,44 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
     // Update Google Calendar Title
     const input = titleInput || document.querySelector('input[aria-label="Add title"]') as HTMLInputElement
     if (input) {
+      // Focus first to simulate user interaction
+      input.focus()
+
       // Check if there is already a key at the start
       const currentVal = input.value
       const keyMatch = currentVal.match(/^\[?([A-Z]+-\d+)\]?\s*/)
       
+      let newValue = ''
       if (keyMatch) {
         // Replace existing key
-        input.value = currentVal.replace(/^\[?[A-Z]+-\d+\]?\s*/, `[${issue.key}] `)
+        newValue = currentVal.replace(/^\[?[A-Z]+-\d+\]?\s*/, `[${issue.key}] `)
       } else {
         // Prepend new key
         const trimmedVal = currentVal.trim()
         if (trimmedVal) {
-           input.value = `[${issue.key}] ${trimmedVal}`
+           newValue = `[${issue.key}] ${trimmedVal}`
         } else {
-           input.value = `[${issue.key}] ${issue.fields.summary}`
+           newValue = `[${issue.key}] ${issue.fields.summary}`
         }
       }
-      input.dispatchEvent(new Event('input', { bubbles: true }))
+
+      // Use native setter to ensure React/frameworks detect the change
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(input, newValue);
+      } else {
+        input.value = newValue;
+      }
+
+      // Dispatch events to trigger listeners
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      // Blur to commit the change (simulating user leaving the field)
+      // We use a small timeout to ensure events are processed
+      setTimeout(() => {
+        input.blur()
+      }, 0)
     }
 
     // Update description - REMOVED as per user request

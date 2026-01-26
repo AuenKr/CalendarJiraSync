@@ -1,9 +1,10 @@
 
-## 2026-01-26 - Bug Fix (Search While Typing)
+## 2026-01-26 - UI Improvements & Bug Fixes
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- Fixed issue where searching by Jira Key (e.g., "PROJ-123") was failing because the key was being stripped from the query.
-  - Updated regex in `src/content/ContentApp.tsx` to only strip keys if they are wrapped in brackets (e.g., `[PROJ-123]`), allowing raw keys to be searched.
-- Fixed issue where API search would fail for non-key queries (e.g., "test") due to invalid JQL generation.
-  - Updated `src/background/index.ts` to only include `key = "QUERY"` in JQL if the query matches a Jira key pattern.
+- **Spinning Sync Button**: Updated `src/popup/App.tsx` to use `isFetching` instead of `isLoading` for the project refresh button spinner. This ensures the spinner appears even when refreshing existing data.
+- **Event Title Update Fix**: Updated `src/content/ContentApp.tsx` to improve how the event title is updated when linking a task.
+  - Now uses the native property setter (`Object.getOwnPropertyDescriptor`) to bypass React/framework wrappers.
+  - Dispatches `input` and `change` events.
+  - Focuses the input before updating and blurs it afterwards (with a slight delay) to simulate user interaction and trigger Google Calendar's internal save logic.
 - Verified build passes.
 ---

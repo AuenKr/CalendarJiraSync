@@ -180,7 +180,7 @@ function App() {
     }
   }
 
-  const { data: projects = [], isLoading: loadingProjects, refetch: refetchProjects } = useQuery({
+  const { data: projects = [], isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
     queryKey: ['projects'],
     queryFn: getProjects,
     enabled: configured,
@@ -260,7 +260,7 @@ function App() {
                     className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"
                     title="Refresh Projects"
                   >
-                    <RefreshCw size={12} className={loadingProjects ? "animate-spin" : ""} />
+                    <RefreshCw size={12} className={fetchingProjects ? "animate-spin" : ""} />
                   </button>
                 </div>
               </div>
@@ -276,7 +276,7 @@ function App() {
                 />
               </div>
               
-              {loadingProjects && projects.length === 0 ? (
+              {fetchingProjects && projects.length === 0 ? (
                 <div className="text-center py-4 text-gray-500 text-xs">Loading projects...</div>
               ) : filteredProjects.length > 0 ? (
                 <div className="space-y-2 max-h-24 overflow-y-auto pr-1 custom-scrollbar">
