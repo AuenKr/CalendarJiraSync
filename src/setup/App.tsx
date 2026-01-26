@@ -76,7 +76,7 @@ function App() {
     <div className="min-h-screen bg-gray-900 text-white p-8 flex flex-col items-center justify-center">
       <div className="w-full max-w-md bg-gray-800 p-8 rounded-xl shadow-lg border border-gray-700">
         <h1 className="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-          Jira Sync Setup
+          Calendar Jira Sync Setup
         </h1>
         
         {step === 1 && (

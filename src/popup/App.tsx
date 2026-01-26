@@ -235,7 +235,7 @@ function App() {
     <div className="w-80 bg-gray-900 text-white p-4 max-h-[500px] overflow-y-auto">
       <header className="flex justify-between items-center mb-6">
         <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-          Jira Sync
+          Calendar Jira Sync
         </h1>
         <button 
           onClick={openSetup}

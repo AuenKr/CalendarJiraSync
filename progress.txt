@@ -1,10 +1,11 @@
 
-## 2026-01-26 - UI Improvements & Bug Fixes
+## 2026-01-26 - Rebranding & Icons
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Spinning Sync Button**: Updated `src/popup/App.tsx` to use `isFetching` instead of `isLoading` for the project refresh button spinner. This ensures the spinner appears even when refreshing existing data.
-- **Event Title Update Fix**: Updated `src/content/ContentApp.tsx` to improve how the event title is updated when linking a task.
-  - Now uses the native property setter (`Object.getOwnPropertyDescriptor`) to bypass React/framework wrappers.
-  - Dispatches `input` and `change` events.
-  - Focuses the input before updating and blurs it afterwards (with a slight delay) to simulate user interaction and trigger Google Calendar's internal save logic.
+- **Renamed App**: Changed name from "Jira Calendar Sync" to "Calendar Jira Sync" in `manifest.json`, `package.json`, `index.html`, and UI components.
+- **Updated Icons**:
+  - Added new SVG icon to `public/icon.svg`.
+  - Installed `sharp` to generate PNG icons.
+  - Created `scripts/generate-icons.js` to generate 16, 32, 48, and 128px PNG icons from the SVG.
+  - Updated `manifest.json` to use the generated PNG icons.
 - Verified build passes.
 ---

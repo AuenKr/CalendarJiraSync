@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#0F172A"/>
+
+  <!-- Calendar base -->
+  <rect x="96" y="120" width="320" height="256" rx="32" fill="#E5E7EB"/>
+  <rect x="96" y="120" width="320" height="64" rx="32" fill="#38BDF8"/>
+
+  <!-- Calendar rings -->
+  <rect x="160" y="80" width="32" height="80" rx="16" fill="#38BDF8"/>
+  <rect x="320" y="80" width="32" height="80" rx="16" fill="#38BDF8"/>
+
+  <!-- Jira style blocks -->
+  <rect x="152" y="216" width="88" height="56" rx="12" fill="#2563EB"/>
+  <rect x="272" y="216" width="88" height="56" rx="12" fill="#0EA5E9"/>
+  <rect x="212" y="296" width="88" height="56" rx="12" fill="#22D3EE"/>
+
+  <!-- Sync arrows -->
+  <path d="M188 360C156 360 132 336 132 304" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+  <path d="M132 304L116 320M132 304L148 320" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+
+  <path d="M324 248C356 248 380 272 380 304" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+  <path d="M380 304L364 288M380 304L396 288" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+</svg>
