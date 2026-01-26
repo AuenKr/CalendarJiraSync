@@ -117,6 +117,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const root = document.createElement('div')
   // Add a class to the root for scoping if needed
   root.className = 'calendar-jira-sync-root'
+  
+  // Detect dark mode from Google Calendar body
+  // GCal sets background color on body. Dark mode is usually #202124 or similar dark colors.
+  // We can also check for specific attributes or just computed style.
+  const updateTheme = () => {
+    const bodyBg = window.getComputedStyle(document.body).backgroundColor
+    // Simple heuristic: if background is dark, enable dark mode
+    // rgb(32, 33, 36) is #202124
+    const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
+    if (isDark) {
+      root.classList.add('dark')
+    } else {
+      root.classList.remove('dark')
+    }
+  }
+  
+  updateTheme()
+  // Observe body attribute changes for theme switch
+  const themeObserver = new MutationObserver(updateTheme)
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
+
   shadow.appendChild(root)
 
   try {

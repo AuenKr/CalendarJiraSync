@@ -326,7 +326,7 @@ function App() {
                    type="date" 
                    value={selectedDate}
                    onChange={(e) => setSelectedDate(e.target.value)}
-                   className="h-8 bg-gray-900/50 border-gray-700 text-xs flex-1"
+                   className="h-8 bg-gray-900/50 border-gray-700 text-xs flex-1 [color-scheme:dark]"
                  />
                </div>
                <button

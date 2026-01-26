@@ -1,10 +1,10 @@
 
-## 2026-01-26 - Revert Date Picker & Fix Theme
+## 2026-01-26 - Fix Date Picker Icon & Theme Sync
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Reverted Date Picker**: Removed `react-day-picker` and restored the native `<input type="date">` in `src/popup/App.tsx` to fix UI issues.
-- **Fixed Theme Contrast**: Updated `src/content/ContentApp.tsx` to explicitly set background and text colors for the search results popover.
-  - Added `bg-white dark:bg-gray-800` to the popover content.
-  - Added `dark:text-white` and `dark:text-gray-300` to the result items to ensure readability in dark mode.
-- **Cleanup**: Removed unused `src/components/ui/calendar.tsx` and uninstalled `react-day-picker` and `date-fns`.
+- **Fixed Date Picker Icon**: Added `[color-scheme:dark]` class to the date input in `src/popup/App.tsx`. This forces the browser to render the native calendar picker icon in a light color, making it visible against the dark background.
+- **Implemented Theme Sync**: Updated `src/content/index.tsx` to automatically detect Google Calendar's theme.
+  - Checks `document.body` background color to determine if it's dark mode.
+  - Adds/removes `.dark` class on the extension's root element accordingly.
+  - Uses a `MutationObserver` to react to theme changes in real-time.
 - **Build**: Verified build passes with `bun run build`.
 ---
