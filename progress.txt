@@ -1,10 +1,7 @@
 
-## 2026-01-26 - Fix Date Picker Icon & Theme Sync
+## 2026-01-26 - Match Google Calendar Dark Theme
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Fixed Date Picker Icon**: Added `[color-scheme:dark]` class to the date input in `src/popup/App.tsx`. This forces the browser to render the native calendar picker icon in a light color, making it visible against the dark background.
-- **Implemented Theme Sync**: Updated `src/content/index.tsx` to automatically detect Google Calendar's theme.
-  - Checks `document.body` background color to determine if it's dark mode.
-  - Adds/removes `.dark` class on the extension's root element accordingly.
-  - Uses a `MutationObserver` to react to theme changes in real-time.
+- **Updated Theme Colors**: Modified `src/index.css` to use `#131314` for dark mode background/popover colors, matching Google Calendar's dark theme exactly as requested.
+- **Refactored Content App**: Updated `src/content/ContentApp.tsx` to use semantic Tailwind classes (e.g., `bg-popover`, `text-foreground`, `border-border`) instead of hardcoded dark mode overrides. This ensures the component correctly inherits the theme variables defined in `src/index.css`.
 - **Build**: Verified build passes with `bun run build`.
 ---

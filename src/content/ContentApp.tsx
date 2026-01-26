@@ -178,7 +178,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
           <div className="w-full h-0" />
         </PopoverTrigger>
         <PopoverContent
-          className="w-[400px] p-0 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+          className="w-[400px] p-0 border-border"
           align="start"
           side="bottom"
           sideOffset={10}
@@ -197,8 +197,8 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
                 onClick={() => handleSelect(issue)}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors"
               >
-                <div className="font-medium text-primary dark:text-white">{issue.key}</div>
-                <div className="text-muted-foreground dark:text-gray-300 truncate">{issue.fields.summary}</div>
+                <div className="font-medium text-foreground">{issue.key}</div>
+                <div className="text-muted-foreground truncate">{issue.fields.summary}</div>
               </button>
             ))}
 

@@ -126,10 +126,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Simple heuristic: if background is dark, enable dark mode
     // rgb(32, 33, 36) is #202124
     const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
-    if (isDark) {
-      root.classList.add('dark')
-    } else {
-      root.classList.remove('dark')
+    
+    const applyTheme = (el: Element) => {
+      if (isDark) {
+        el.classList.add('dark')
+      } else {
+        el.classList.remove('dark')
+      }
+    }
+
+    applyTheme(root)
+    
+    // Also apply to popover container if it exists
+    const popoverContainer = shadow.getElementById('popover-container')
+    if (popoverContainer) {
+      applyTheme(popoverContainer)
     }
   }
   
@@ -137,6 +148,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Observe body attribute changes for theme switch
   const themeObserver = new MutationObserver(updateTheme)
   themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
+
+  // Observe shadow root for new popover container
+  const shadowObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node instanceof Element && node.id === 'popover-container') {
+          // Apply current theme
+          updateTheme()
+        }
+      }
+    }
+  })
+  shadowObserver.observe(shadow, { childList: true })
 
   shadow.appendChild(root)
 
