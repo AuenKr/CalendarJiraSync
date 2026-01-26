@@ -163,7 +163,7 @@ function App() {
       if (loggedCount === 0 && errors === 0) {
         setLogResult('No tasks with [KEY-123] found for selected date')
       } else {
-        setLogResult(`Logged ${loggedCount} tasks${errors > 0 ? `, ${errors} failed` : ''}!`)
+        setLogResult(`Log for ${loggedCount} Event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}!`)
         if (loggedCount > 0) {
           setLastLoggedTime(new Date().toISOString())
         }

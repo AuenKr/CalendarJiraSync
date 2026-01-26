@@ -1,12 +1,6 @@
 
-## 2026-01-26 - Fix UI & Cleanup
+## 2026-01-26 - UI Text Update
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Fixed UI Breakage**:
-  - Identified that the Popover component was looking for the old root ID (`jira-sync-extension-root`) instead of the new one (`calendar-jira-sync-root`).
-  - Updated `src/components/ui/popover.tsx` to use the correct ID, ensuring styles are correctly applied within the Shadow DOM.
-- **Removed Logs**:
-  - Commented out `console.log` statements in `src/content/index.tsx`, `src/popup/App.tsx`, and `src/content/scraper.ts` to prepare for production.
-  - Kept `console.error` for critical issues.
-- **Build**:
-  - Used `bun run build` to verify the build process.
+- **Updated Log Message**: Changed the success message in `src/popup/App.tsx` from "Logged X tasks" to "Log for X Event(s)" to match user preference.
+- **Build**: Verified build passes with `bun run build`.
 ---
