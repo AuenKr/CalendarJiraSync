@@ -38,7 +38,7 @@ function App() {
       }
       
       const events = response.events as CalendarEvent[]
-      console.log('[Jira Sync] Fetched events from content script:', events)
+      // console.log('[Jira Sync] Fetched events from content script:', events)
 
       let loggedCount = 0
       let errors = 0
@@ -55,7 +55,7 @@ function App() {
         }
       }
       const processedEvents = Array.from(uniqueEvents.values())
-      console.log('[Jira Sync] 1. Fetched all events:', processedEvents)
+      // console.log('[Jira Sync] 1. Fetched all events:', processedEvents)
 
       const filteredEvents: CalendarEvent[] = []
 
@@ -79,13 +79,13 @@ function App() {
         }
       }
 
-      console.log('[Jira Sync] 2. Filtered events (Date + Jira Key):', filteredEvents)
+      // console.log('[Jira Sync] 2. Filtered events (Date + Jira Key):', filteredEvents)
 
       // Group events by Issue Key for description updates
       const eventsByIssue = new Map<string, CalendarEvent[]>()
 
       for (const event of filteredEvents) {
-        console.log('[Jira Sync] 3. Processing event:', event.title)
+        // console.log('[Jira Sync] 3. Processing event:', event.title)
         
         const match = event.title.match(/\[([A-Z]+-\d+)\]/)
         if (!match) continue
@@ -106,7 +106,7 @@ function App() {
             // Fetch description if event ID is available
             let description = event.description
             if (!description && event.id) {
-               console.log(`[Jira Sync] Fetching description for event ${event.id}`)
+               // console.log(`[Jira Sync] Fetching description for event ${event.id}`)
                const descResponse = await chrome.tabs.sendMessage(tab.id, { 
                  type: 'FETCH_EVENT_DESCRIPTION', 
                  payload: { eventId: event.id } 
@@ -114,7 +114,7 @@ function App() {
                if (descResponse && descResponse.description) {
                  description = descResponse.description
                  event.description = description
-                 console.log(`[Jira Sync] Fetched description for ${issueKey}:`, description)
+                 // console.log(`[Jira Sync] Fetched description for ${issueKey}:`, description)
                }
             }
 
@@ -125,7 +125,7 @@ function App() {
             const jiraStarted = new Date(event.startTime).toISOString().replace('Z', '+0000')
             
             await addWorklog(issueKey, durationSeconds, jiraStarted, comment)
-            console.log(`[Jira Sync] 3b. Successfully logged time for: ${issueKey}, Duration: ${durationSeconds}s, Comment: ${comment?.substring(0, 50)}...`)
+            // console.log(`[Jira Sync] 3b. Successfully logged time for: ${issueKey}, Duration: ${durationSeconds}s, Comment: ${comment?.substring(0, 50)}...`)
             loggedCount++
           } catch (e) {
             console.error(`[Jira Sync] Failed to log worklog for ${issueKey}`, e)
@@ -134,7 +134,7 @@ function App() {
       }
 
       // 4. Update Issue Descriptions
-      console.log('[Jira Sync] 4. Updating Issue Descriptions...')
+      // console.log('[Jira Sync] 4. Updating Issue Descriptions...')
       for (const [issueKey, issueEvents] of eventsByIssue.entries()) {
         try {
           let appendText = ''
@@ -149,9 +149,9 @@ function App() {
           }
           
           if (appendText) {
-             console.log(`[Jira Sync] Appending to ${issueKey}:`, appendText)
+             // console.log(`[Jira Sync] Appending to ${issueKey}:`, appendText)
              await updateIssueDescription(issueKey, appendText)
-             console.log(`[Jira Sync] Successfully updated description for ${issueKey}`)
+             // console.log(`[Jira Sync] Successfully updated description for ${issueKey}`)
           }
         } catch (e) {
           console.error(`[Jira Sync] Failed to update description for ${issueKey}`, e)

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 
 function getPortalContainer() {
   // Try to find the shadow root host first
-  const shadowHost = document.getElementById("jira-sync-extension-root")
+  const shadowHost = document.getElementById("calendar-jira-sync-root")
   if (shadowHost && shadowHost.shadowRoot) {
     // We need to render into the shadow root for styles to apply
     // But Radix Portal expects an HTMLElement, and shadowRoot is a DocumentFragment

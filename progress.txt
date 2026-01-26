@@ -1,11 +1,12 @@
 
-## 2026-01-26 - Rebranding & Icons
+## 2026-01-26 - Fix UI & Cleanup
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- **Renamed App**: Changed name from "Jira Calendar Sync" to "Calendar Jira Sync" in `manifest.json`, `package.json`, `index.html`, and UI components.
-- **Updated Icons**:
-  - Added new SVG icon to `public/icon.svg`.
-  - Installed `sharp` to generate PNG icons.
-  - Created `scripts/generate-icons.js` to generate 16, 32, 48, and 128px PNG icons from the SVG.
-  - Updated `manifest.json` to use the generated PNG icons.
-- Verified build passes.
+- **Fixed UI Breakage**:
+  - Identified that the Popover component was looking for the old root ID (`jira-sync-extension-root`) instead of the new one (`calendar-jira-sync-root`).
+  - Updated `src/components/ui/popover.tsx` to use the correct ID, ensuring styles are correctly applied within the Shadow DOM.
+- **Removed Logs**:
+  - Commented out `console.log` statements in `src/content/index.tsx`, `src/popup/App.tsx`, and `src/content/scraper.ts` to prepare for production.
+  - Kept `console.error` for critical issues.
+- **Build**:
+  - Used `bun run build` to verify the build process.
 ---

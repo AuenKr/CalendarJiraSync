@@ -7,7 +7,7 @@ export const scrapeEvents = (): CalendarEvent[] => {
   // This is more stable than role="button" which might vary
   const eventElements = document.querySelectorAll('div[data-eventid]')
   
-  console.log('[Jira Sync] Found event candidates:', eventElements.length)
+  // console.log('[Jira Sync] Found event candidates:', eventElements.length)
 
   // Regex to match "10am to 11am, Title"
   // Captures: 1=Start, 2=End, 3=Title
@@ -18,7 +18,7 @@ export const scrapeEvents = (): CalendarEvent[] => {
   
   eventElements.forEach(el => {
     let text = el.getAttribute('aria-label')
-    let source = 'aria-label'
+    // let source = 'aria-label'
 
     // Fallback: Look for a child containing the pattern
     if (!text) {
@@ -29,7 +29,7 @@ export const scrapeEvents = (): CalendarEvent[] => {
         const childText = child.textContent || ''
         if (timePattern.test(childText)) {
           text = childText
-          source = 'child-text-pattern'
+          // source = 'child-text-pattern'
           break
         }
       }
@@ -61,7 +61,7 @@ export const scrapeEvents = (): CalendarEvent[] => {
         if (durationSeconds > 0) {
           const id = el.getAttribute('data-eventid') || undefined
           if (id && !uniqueEvents.has(id)) {
-             console.log(`[Jira Sync] Scraped: "${title}" (${durationSeconds}s) [Source: ${source}]`)
+             // console.log(`[Jira Sync] Scraped: "${title}" (${durationSeconds}s) [Source: ${source}]`)
              uniqueEvents.set(id, {
                id,
                title,
@@ -84,7 +84,7 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
     // URL format: https://calendar.google.com/calendar/u/0/r/eventedit/{eid}
     
     const url = `https://calendar.google.com/calendar/u/0/r/eventedit/${eventId}`
-    console.log(`[Jira Sync] Fetching description from: ${url}`)
+    // console.log(`[Jira Sync] Fetching description from: ${url}`)
     
     const response = await fetch(url)
     const html = await response.text()
@@ -128,7 +128,7 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
           // If not base64, use as is
         }
         
-        console.log(`[Jira Sync] Searching for event ID: ${realId} in initialdata`)
+        // console.log(`[Jira Sync] Searching for event ID: ${realId} in initialdata`)
         
         const findEvent = (data: any, id: string): any => {
           if (!data || typeof data !== 'object') return null
@@ -157,7 +157,7 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
           // Check index 64 first (most likely)
           if (eventData.length > 64 && Array.isArray(eventData[64]) && eventData[64][0] === null && typeof eventData[64][1] === 'string') {
              const desc = eventData[64][1]
-             console.log('[Jira Sync] Extracted description from JSON (index 64):', desc.substring(0, 100) + '...')
+             // console.log('[Jira Sync] Extracted description from JSON (index 64):', desc.substring(0, 100) + '...')
              return desc
           }
           
@@ -180,7 +180,7 @@ export const fetchEventDescription = async (eventId: string): Promise<string | u
           // If we are here, maybe it's at index 65?
            if (eventData.length > 65 && Array.isArray(eventData[65]) && eventData[65].length === 2 && eventData[65][0] === null && typeof eventData[65][1] === 'string') {
              const desc = eventData[65][1]
-             console.log('[Jira Sync] Extracted description from JSON (index 65):', desc.substring(0, 100) + '...')
+             // console.log('[Jira Sync] Extracted description from JSON (index 65):', desc.substring(0, 100) + '...')
              return desc
           }
           
@@ -226,8 +226,8 @@ function parseTime(timeStr: string, dateStr?: string): Date | null {
     
     // Normalize: "10am" -> "10:00 AM"
     let clean = timeStr.toLowerCase().trim()
-    let isPM = clean.includes('pm')
-    let isAM = clean.includes('am')
+    const isPM = clean.includes('pm')
+    const isAM = clean.includes('am')
     
     // Remove am/pm
     clean = clean.replace(/[ap]m/, '').trim()
