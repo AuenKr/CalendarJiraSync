@@ -50,6 +50,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
   const debouncedQuery = useDebounce(query, 300)
   const [open, setOpen] = useState(false)
   const [forceApi, setForceApi] = useState(false)
+  const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
 
   // Queries
   const { data, isLoading: loading } = useQuery({
@@ -78,6 +79,9 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       setForceApi(false)
     }
 
+    const handleFocus = () => setIsFocused(true)
+    const handleBlur = () => setIsFocused(false)
+
     // Initial value
     if (titleInput.value) {
       let val = titleInput.value
@@ -89,10 +93,14 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
 
     titleInput.addEventListener('input', handleInput)
     titleInput.addEventListener('focus', handleInput)
+    titleInput.addEventListener('focus', handleFocus)
+    titleInput.addEventListener('blur', handleBlur)
 
     return () => {
       titleInput.removeEventListener('input', handleInput)
       titleInput.removeEventListener('focus', handleInput)
+      titleInput.removeEventListener('focus', handleFocus)
+      titleInput.removeEventListener('blur', handleBlur)
     }
   }, [titleInput, query])
 
@@ -108,6 +116,12 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       updateOpen(false)
       return
     }
+
+    if (!isFocused) {
+      updateOpen(false)
+      return
+    }
+
     // If we have results, open
     if (results.length > 0) {
       updateOpen(true)
@@ -126,7 +140,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
     else if (source === 'api' && results.length === 0) {
       updateOpen(true)
     }
-  }, [debouncedQuery, results.length, loading, source, open])
+  }, [debouncedQuery, results.length, loading, source, open, isFocused])
 
   const handleSelect = (issue: JiraIssue) => {
     setQuery('')
@@ -193,6 +207,7 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
           side="bottom"
           sideOffset={10}
           onOpenAutoFocus={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
         >
           <div className="max-h-60 overflow-y-auto">
             {loading && <div className="p-2 text-xs text-muted-foreground text-center">Searching...</div>}

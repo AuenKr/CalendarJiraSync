@@ -6,3 +6,16 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Goal**: These changes save vertical space, ensuring the log result message is visible without scrolling.
 - **Build**: Verified build passes with `bun run build`.
 ---
+
+## 2026-01-26 - Linting & Type Safety Improvements
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- **Refactored Button Component**: Extracted `buttonVariants` to `src/components/ui/button-variants.ts` to satisfy `react-refresh/only-export-components`.
+- **Fixed Content Script Issues**:
+  - Resolved "Modifying component props" error in `ContentApp.tsx` by using a helper to set input value.
+  - Fixed "Calling setState synchronously within an effect" by wrapping updates in `setTimeout`.
+- **Type Safety**:
+  - Removed `any` types across `background/index.ts`, `lib/jira.ts`, `store/useConfigStore.ts`, and `scraper.ts`.
+  - Imported proper types (`Issue`, `Project`, `SearchResults`) from `jira.js`.
+  - Replaced empty object type `{}` with `Record<string, never>`.
+- **Verification**: `bun run lint` passes with 0 errors. `bun run build` succeeds.
+---
