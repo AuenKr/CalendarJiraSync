@@ -36,12 +36,18 @@ export const useConfigStore = create<ConfigState>()(
         }
       }),
       setProjects: (projects) => set({ projects }),
-      setLastLoggedTime: (date, time) => set((state) => ({
-        lastLoggedTimes: {
-          ...state.lastLoggedTimes,
-          [date]: time
+      setLastLoggedTime: (date, time) => set((state) => {
+        const newTimes = { ...state.lastLoggedTimes, [date]: time }
+        
+        // LRU-like cleanup: Keep only last 30 days
+        const sortedDates = Object.keys(newTimes).sort()
+        if (sortedDates.length > 30) {
+          const datesToRemove = sortedDates.slice(0, sortedDates.length - 30)
+          datesToRemove.forEach(d => delete newTimes[d])
         }
-      })),
+        
+        return { lastLoggedTimes: newTimes }
+      }),
       isConfigured: () => {
         const { jiraDomain, email, apiToken } = get()
         return !!(jiraDomain && email && apiToken)

@@ -21,3 +21,13 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Google Calendar Event Bubble does not have a title input, so we must read from the title element (e.g., `[role="heading"]`).
   - `ContentApp` needed to be flexible to handle both input-based (Edit Page) and element-based (Bubble) title sources.
 ---
+
+## 2026-01-30 - US-016
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- **Smart Work Log Filtering**:
+  - Implemented LRU cache logic in `useConfigStore.ts` to keep only the last 30 days of sync history.
+  - Fixed date handling in `App.tsx` to correctly use local time for date comparisons, ensuring events are filtered correctly based on the user's local date.
+  - Verified logic for preventing duplicates (strict cutoff based on `lastLoggedTime`) and ignoring in-progress events.
+- **Learnings**:
+  - `new Date().toISOString()` returns UTC, which can cause date mismatch issues when comparing with local calendar dates. Using `toLocaleDateString('en-CA')` or manual offset adjustment is necessary for correct local YYYY-MM-DD strings.
+---

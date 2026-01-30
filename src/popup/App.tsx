@@ -14,7 +14,13 @@ function App() {
   const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
   const [loggingTime, setLoggingTime] = useState(false)
   const [logResult, setLogResult] = useState<string>('')
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    // Initialize with local date YYYY-MM-DD
+    const d = new Date()
+    const offset = d.getTimezoneOffset()
+    const local = new Date(d.getTime() - (offset * 60 * 1000))
+    return local.toISOString().split('T')[0]
+  })
 
   const handleLogTime = async () => {
     setLoggingTime(true)
@@ -43,9 +49,6 @@ function App() {
       let loggedCount = 0
       let errors = 0
       
-      // Filter events by selected date
-      const targetDate = new Date(selectedDate)
-      const targetDateStr = targetDate.toDateString() // "Sun Jan 25 2026"
       const currentTime = new Date()
 
       // Get last logged time for this date
@@ -67,7 +70,13 @@ function App() {
       for (const event of processedEvents) {
         // Check if event is on the selected date
         const eventDate = new Date(event.startTime)
-        if (eventDate.toDateString() !== targetDateStr) {
+        
+        // Get local YYYY-MM-DD for the event
+        const offset = eventDate.getTimezoneOffset()
+        const localEventDate = new Date(eventDate.getTime() - (offset * 60 * 1000))
+        const eventDateStr = localEventDate.toISOString().split('T')[0]
+
+        if (eventDateStr !== selectedDate) {
            continue
         }
 

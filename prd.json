@@ -221,6 +221,75 @@
       "priority": 15,
       "passes": true,
       "notes": "From .docs/v2/problem.md"
+    },
+    {
+      "id": "US-016",
+      "title": "Smart Work Log Filtering",
+      "description": "Prevent duplicate worklogs by maintaining a lastLoggedTime pointer for each day.",
+      "acceptanceCriteria": [
+        "Maintain lastLoggedTime for each calendar date (LRU Cache ~30 days)",
+        "Only process events ending after lastLoggedTime",
+        "Ignore events currently in progress (Current Time < Event End Time)",
+        "Filter events ending between Start of Today and Current Time if syncing for Today",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "From .docs/v2/problem.md"
+    },
+    {
+      "id": "US-017",
+      "title": "Work Log Content Format",
+      "description": "Update worklog content format to include event details in the comment instead of task description.",
+      "acceptanceCriteria": [
+        "Format: [Event Title] \\n[Date]\\n[Start Time] - [End Time]\\n[Event Description]",
+        "Add this content to Worklog Comment",
+        "Ensure main task description is not modified",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "From .docs/v2/problem.md"
+    },
+    {
+      "id": "US-018",
+      "title": "Setup Experience Improvements",
+      "description": "Improve Jira Domain input with flexible handling and auto-suggestions.",
+      "acceptanceCriteria": [
+        "Allow flexible inputs (company, company.atlassian.net, full URL)",
+        "Auto-suggest 'company.atlassian.net' in dropdown",
+        "Update input value when suggestion is selected",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "From .docs/v2/problem.md"
+    },
+    {
+      "id": "US-019",
+      "title": "Fix Reload Focus Issue",
+      "description": "Ensure Jira autocomplete triggers correctly after page reload when clicking empty slot.",
+      "acceptanceCriteria": [
+        "Correctly re-attach listeners to active input element after reload/navigation",
+        "Verify typing triggers autocomplete in the scenario",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "From .docs/v2/problem.md"
+    },
+    {
+      "id": "US-020",
+      "title": "Fix Linked Task Visibility",
+      "description": "Ensure currently linked task is always visible at the top of search results.",
+      "acceptanceCriteria": [
+        "Always fetch and display linked issue (from title key) at top of results",
+        "Work even if search query is empty or unrelated",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "From .docs/v2/problem.md"
     }
   ]
 }
