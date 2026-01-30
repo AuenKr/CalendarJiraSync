@@ -1,4 +1,8 @@
 
+## Codebase Patterns
+- Use `toLocaleDateString('en-CA')` or manual timezone offset adjustment for local YYYY-MM-DD strings to avoid UTC mismatches with Calendar dates.
+- Google Calendar Event Bubble (popup) uses `[role="heading"]` for title, while Edit Page uses `input[aria-label="Add title"]`.
+
 ## 2026-01-27 - Fix Suggestion Box Behavior
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Bug Fix**: The suggestion box now closes when the event title input loses focus.
@@ -30,4 +34,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Verified logic for preventing duplicates (strict cutoff based on `lastLoggedTime`) and ignoring in-progress events.
 - **Learnings**:
   - `new Date().toISOString()` returns UTC, which can cause date mismatch issues when comparing with local calendar dates. Using `toLocaleDateString('en-CA')` or manual offset adjustment is necessary for correct local YYYY-MM-DD strings.
+---
+
+## 2026-01-30 - US-017
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- **Work Log Content Format**:
+  - Updated `src/popup/App.tsx` to include the date in the worklog comment.
+  - Format: `[Event Title] \n[Date]\n[Start Time] - [End Time]\n[Event Description]`.
+  - Used `toLocaleDateString()` for the date to ensure it matches the user's locale.
+- **Learnings**:
+  - Jira ADF text nodes support newlines, so constructing a single string with `\n` works for the comment field.
 ---

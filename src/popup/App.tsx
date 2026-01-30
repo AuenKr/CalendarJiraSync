@@ -136,11 +136,12 @@ function App() {
                }
             }
 
-            // New Comment Format: [Title] \n [Start] - [End] \n [Description]
+            // New Comment Format: [Title] \n[Date]\n[Start Time] - [End Time]\n[Event Description]
+            const dateStr = startTime.toLocaleDateString()
             const timeRange = `${startTime.toLocaleTimeString()} - ${endTime.toLocaleTimeString()}`
             const cleanTitle = event.title.replace(/\[?[A-Z]+-\d+\]?\s*/, '').trim()
             
-            let comment = `[${cleanTitle}]\n${timeRange}`
+            let comment = `[${cleanTitle}]\n${dateStr}\n${timeRange}`
             if (description) {
               comment += `\n\n${description}`
             }
