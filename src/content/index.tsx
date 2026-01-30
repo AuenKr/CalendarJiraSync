@@ -32,6 +32,15 @@ function injectApp(modal: Element) {
                      modal.querySelector('input[type="text"]') ||
                      modal.querySelector('#xTiIn') // Full edit page title input ID
 
+  let titleElement: HTMLElement | undefined
+  if (!titleInput) {
+     // Try to find title element (for Bubble view)
+     // It's usually a div with role="heading" or specific classes
+     titleElement = (modal.querySelector('[role="heading"]') as HTMLElement) ||
+                    (modal.querySelector('.JAPzS') as HTMLElement) ||
+                    (modal.querySelector('.gUD7Lf') as HTMLElement)
+  }
+
   let injected = false
 
   if (titleInput && titleInput.parentElement) {
@@ -75,8 +84,14 @@ function injectApp(modal: Element) {
       // console.log('[Calendar Jira Sync] Fallback: Injecting after title input parent')
       titleInput.parentElement.insertAdjacentElement('afterend', host)
       injected = true
+    }
+  } else if (titleElement && titleElement.parentElement) {
+      // Inject after title element for Bubble view
+      // console.log('[Calendar Jira Sync] Found title element', titleElement)
+      titleElement.parentElement.insertAdjacentElement('afterend', host)
+      injected = true
   }
-}
+
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -168,7 +183,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     ReactDOM.createRoot(root).render(
       <StrictMode>
         <QueryClientProvider client={queryClient}>
-          <ContentApp titleInput={titleInput as HTMLInputElement} />
+          <ContentApp 
+            titleInput={titleInput as HTMLInputElement} 
+            titleElement={titleElement}
+          />
         </QueryClientProvider>
       </StrictMode>
     )

@@ -9,11 +9,11 @@ interface ConfigState {
   apiToken: string
   selectedProjectKeys: string[]
   projects: Project[]
-  lastLoggedTime: string | null
+  lastLoggedTimes: Record<string, string> // Date (YYYY-MM-DD) -> ISO Timestamp
   setConfig: (config: { jiraDomain: string; email: string; apiToken: string }) => void
   toggleProject: (projectKey: string) => void
   setProjects: (projects: Project[]) => void
-  setLastLoggedTime: (time: string) => void
+  setLastLoggedTime: (date: string, time: string) => void
   isConfigured: () => boolean
 }
 
@@ -25,7 +25,7 @@ export const useConfigStore = create<ConfigState>()(
       apiToken: '',
       selectedProjectKeys: [],
       projects: [],
-      lastLoggedTime: null,
+      lastLoggedTimes: {},
       setConfig: (config) => set(config),
       toggleProject: (projectKey) => set((state) => {
         const current = state.selectedProjectKeys || []
@@ -36,7 +36,12 @@ export const useConfigStore = create<ConfigState>()(
         }
       }),
       setProjects: (projects) => set({ projects }),
-      setLastLoggedTime: (time) => set({ lastLoggedTime: time }),
+      setLastLoggedTime: (date, time) => set((state) => ({
+        lastLoggedTimes: {
+          ...state.lastLoggedTimes,
+          [date]: time
+        }
+      })),
       isConfigured: () => {
         const { jiraDomain, email, apiToken } = get()
         return !!(jiraDomain && email && apiToken)

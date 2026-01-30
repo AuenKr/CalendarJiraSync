@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, addWorklog, updateIssueDescription, type JiraProject } from '../lib/jira'
+import { syncData, getProjects, addWorklog, type JiraProject } from '../lib/jira'
 import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import type { CalendarEvent } from '@/types/messages'
 
 function App() {
-  const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTime, setLastLoggedTime } = useConfigStore()
+  const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTimes, setLastLoggedTime } = useConfigStore()
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
   const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
@@ -46,6 +46,11 @@ function App() {
       // Filter events by selected date
       const targetDate = new Date(selectedDate)
       const targetDateStr = targetDate.toDateString() // "Sun Jan 25 2026"
+      const currentTime = new Date()
+
+      // Get last logged time for this date
+      const lastLoggedTimeStr = lastLoggedTimes[selectedDate]
+      const lastLoggedTime = lastLoggedTimeStr ? new Date(lastLoggedTimeStr) : null
 
       // Deduplicate events by ID to avoid multiple API calls for the same event
       const uniqueEvents = new Map<string, CalendarEvent>()
@@ -74,15 +79,25 @@ function App() {
         const endTime = new Date(event.endTime)
         const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000
 
+        // Rule 1: Completed Events Only (Current Time > Event End Time)
+        // We allow a small buffer (e.g. 1 minute) to account for clock skew
+        if (endTime.getTime() > currentTime.getTime()) {
+          // console.log(`[Jira Sync] Skipping in-progress/future event: ${event.title}`)
+          continue
+        }
+
+        // Rule 2: Strict Cutoff (Event End Time > Last Logged Time)
+        if (lastLoggedTime && endTime.getTime() <= lastLoggedTime.getTime()) {
+          // console.log(`[Jira Sync] Skipping already logged event: ${event.title}`)
+          continue
+        }
+
         if (match && match[1] && durationSeconds > 0 && event.startTime) {
             filteredEvents.push(event)
         }
       }
 
-      // console.log('[Jira Sync] 2. Filtered events (Date + Jira Key):', filteredEvents)
-
-      // Group events by Issue Key for description updates
-      const eventsByIssue = new Map<string, CalendarEvent[]>()
+      // console.log('[Jira Sync] 2. Filtered events (Date + Jira Key + Rules):', filteredEvents)
 
       for (const event of filteredEvents) {
         // console.log('[Jira Sync] 3. Processing event:', event.title)
@@ -92,12 +107,6 @@ function App() {
 
         const issueKey = match[1]
         
-        // Add to group
-        if (!eventsByIssue.has(issueKey)) {
-          eventsByIssue.set(issueKey, [])
-        }
-        eventsByIssue.get(issueKey)?.push(event)
-
         const startTime = new Date(event.startTime)
         const endTime = new Date(event.endTime)
         const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000
@@ -118,14 +127,20 @@ function App() {
                }
             }
 
-            // Use description as comment if available, otherwise use title
-            const comment = description ? `${event.title}\n\n${description}` : event.title
+            // New Comment Format: [Title] \n [Start] - [End] \n [Description]
+            const timeRange = `${startTime.toLocaleTimeString()} - ${endTime.toLocaleTimeString()}`
+            const cleanTitle = event.title.replace(/\[?[A-Z]+-\d+\]?\s*/, '').trim()
+            
+            let comment = `[${cleanTitle}]\n${timeRange}`
+            if (description) {
+              comment += `\n\n${description}`
+            }
             
             // Format date for Jira (replace Z with +0000 to ensure compatibility)
             const jiraStarted = new Date(event.startTime).toISOString().replace('Z', '+0000')
             
             await addWorklog(issueKey, durationSeconds, jiraStarted, comment)
-            // console.log(`[Jira Sync] 3b. Successfully logged time for: ${issueKey}, Duration: ${durationSeconds}s, Comment: ${comment?.substring(0, 50)}...`)
+            // console.log(`[Jira Sync] 3b. Successfully logged time for: ${issueKey}, Duration: ${durationSeconds}s`)
             loggedCount++
           } catch (e) {
             console.error(`[Jira Sync] Failed to log worklog for ${issueKey}`, e)
@@ -133,39 +148,13 @@ function App() {
           }
       }
 
-      // 4. Update Issue Descriptions
-      // console.log('[Jira Sync] 4. Updating Issue Descriptions...')
-      for (const [issueKey, issueEvents] of eventsByIssue.entries()) {
-        try {
-          let appendText = ''
-          for (const event of issueEvents) {
-             // Format: \nEventName(Without the taskID) From: Date To: Date\nEventDescription\n
-             const cleanTitle = event.title.replace(/\[?[A-Z]+-\d+\]?\s*/, '').trim()
-             const start = new Date(event.startTime).toLocaleString()
-             const end = new Date(event.endTime).toLocaleString()
-             const desc = event.description || ''
-             
-             appendText += `\n${cleanTitle} From: ${start} To: ${end}\n${desc}\n`
-          }
-          
-          if (appendText) {
-             // console.log(`[Jira Sync] Appending to ${issueKey}:`, appendText)
-             await updateIssueDescription(issueKey, appendText)
-             // console.log(`[Jira Sync] Successfully updated description for ${issueKey}`)
-          }
-        } catch (e) {
-          console.error(`[Jira Sync] Failed to update description for ${issueKey}`, e)
-          // Don't increment error count here as it's a secondary action? 
-          // Or maybe we should? Let's keep it separate for now or just log it.
-        }
-      }
-      
       if (loggedCount === 0 && errors === 0) {
-        setLogResult('No tasks with [KEY-123] found for selected date')
+        setLogResult('No new completed tasks found to log')
       } else {
-        setLogResult(`Log for ${loggedCount} Event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}!`)
+        setLogResult(`Logged ${loggedCount} Event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}!`)
         if (loggedCount > 0) {
-          setLastLoggedTime(new Date().toISOString())
+          // Update last logged time for this date to NOW
+          setLastLoggedTime(selectedDate, new Date().toISOString())
         }
       }
     } catch (e: unknown) {
@@ -338,9 +327,9 @@ function App() {
                 <Calendar size={16} className={loggingTime ? "animate-pulse" : ""} />
                 {loggingTime ? 'Logging Time...' : 'Log Time'}
               </button>
-              {lastLoggedTime && (
+              {lastLoggedTimes[selectedDate] && (
                 <p className="text-[10px] text-center text-gray-500">
-                  Last logged: {new Date(lastLoggedTime).toLocaleString()}
+                  Last logged: {new Date(lastLoggedTimes[selectedDate]).toLocaleTimeString()}
                 </p>
               )}
               {logResult && (

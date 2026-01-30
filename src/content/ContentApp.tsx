@@ -1,30 +1,9 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useQuery } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { RefreshCw, Check, ChevronDown, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { searchIssues, type JiraIssue } from '../lib/jira'
-
-// Helper to update description - REMOVED
-/*
-function updateDescription(key: string) {
-  const descEl = document.querySelector('[aria-label="Description"]') as HTMLElement
-  if (descEl) {
-    let currentText = descEl.innerText || descEl.textContent || ''
-    
-    // Remove existing Jira metadata if present to avoid duplicates/conflicts
-    currentText = currentText.replace(/Jira Issue: [A-Z]+-\d+/g, '').trim()
-    
-    let newMetadata = `\n\nJira Issue: ${key}`
-
-    if (descEl.isContentEditable) {
-      descEl.innerText = currentText + newMetadata
-    } else if (descEl.tagName === 'TEXTAREA') {
-      (descEl as HTMLTextAreaElement).value = currentText + newMetadata
-    }
-    descEl.dispatchEvent(new Event('input', { bubbles: true }))
-  }
-}
-*/
+import { searchIssues, getIssue, getTransitions, transitionIssue, type JiraIssue, type JiraTransition } from '../lib/jira'
+import { cn } from '@/lib/utils'
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -45,14 +24,126 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.value = value
 }
 
-export default function ContentApp({ titleInput }: { titleInput?: HTMLInputElement }) {
+// Status priority map for sorting
+const STATUS_PRIORITY: Record<string, number> = {
+  'In Progress': 1,
+  'To Do': 2,
+  'Done': 3
+}
+
+function getStatusPriority(statusName?: string): number {
+  if (!statusName) return 99
+  return STATUS_PRIORITY[statusName] || 99
+}
+
+export default function ContentApp({ 
+  titleInput: initialInput,
+  titleElement
+}: { 
+  titleInput?: HTMLInputElement,
+  titleElement?: HTMLElement
+}) {
+  const [titleInput, setTitleInput] = useState<HTMLInputElement | undefined>(initialInput)
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebounce(query, 300)
   const [open, setOpen] = useState(false)
   const [forceApi, setForceApi] = useState(false)
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
+  const [linkedKey, setLinkedKey] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
-  // Queries
+  // Robust Input Detection
+  useEffect(() => {
+    // If we have a title element (Bubble mode), we don't need to poll for input
+    if (titleElement) return
+
+    // If we have an input and it's connected, great.
+    if (titleInput && titleInput.isConnected) return
+
+    // Otherwise, try to find the active title input
+    const findInput = () => {
+      const input = document.querySelector('input[aria-label="Add title"]') || 
+                    document.querySelector('input[aria-label="Title"]') ||
+                    document.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
+      
+      if (input && input !== titleInput) {
+        // console.log('[Jira Sync] Found new title input', input)
+        setTitleInput(input as HTMLInputElement)
+      }
+    }
+
+    findInput()
+    const interval = setInterval(findInput, 1000) // Poll every second to ensure we have the valid input
+    return () => clearInterval(interval)
+  }, [titleInput, titleElement])
+
+  // Extract linked key from input or element
+  useEffect(() => {
+    const checkKey = () => {
+      let value = ''
+      if (titleInput) {
+        value = titleInput.value
+      } else if (titleElement) {
+        value = titleElement.textContent || ''
+      }
+
+      const match = value.match(/^\[?([A-Z]+-\d+)\]?/)
+      if (match) {
+        setLinkedKey(match[1])
+      } else {
+        setLinkedKey(null)
+      }
+    }
+
+    checkKey()
+    
+    if (titleInput) {
+      const handleInput = () => checkKey()
+      titleInput.addEventListener('input', handleInput)
+      titleInput.addEventListener('change', handleInput) // Also listen to change for programmatic updates
+      titleInput.addEventListener('keyup', handleInput) // Catch keyups just in case
+
+      return () => {
+        titleInput.removeEventListener('input', handleInput)
+        titleInput.removeEventListener('change', handleInput)
+        titleInput.removeEventListener('keyup', handleInput)
+      }
+    } else if (titleElement) {
+      // Observe changes to title element text
+      const observer = new MutationObserver(checkKey)
+      observer.observe(titleElement, { childList: true, characterData: true, subtree: true })
+      return () => observer.disconnect()
+    }
+  }, [titleInput, titleElement])
+
+  // Fetch linked issue details (status)
+  const { data: linkedIssue, refetch: refetchLinkedIssue } = useQuery({
+    queryKey: ['issue', linkedKey],
+    queryFn: () => getIssue(linkedKey!),
+    enabled: !!linkedKey,
+    staleTime: 1000 * 60 * 5,
+  })
+
+  // Fetch transitions for linked issue
+  const { data: transitions } = useQuery({
+    queryKey: ['transitions', linkedKey],
+    queryFn: () => getTransitions(linkedKey!),
+    enabled: !!linkedKey,
+    staleTime: 1000 * 60 * 5,
+  })
+
+  // Transition mutation
+  const transitionMutation = useMutation({
+    mutationFn: async ({ issueKey, transitionId }: { issueKey: string, transitionId: string }) => {
+      await transitionIssue(issueKey, transitionId)
+    },
+    onSuccess: () => {
+      refetchLinkedIssue()
+      queryClient.invalidateQueries({ queryKey: ['transitions', linkedKey] })
+    }
+  })
+
+  // Search Queries
   const { data, isLoading: loading } = useQuery({
     queryKey: ['issues', debouncedQuery, forceApi],
     queryFn: () => searchIssues(debouncedQuery, forceApi),
@@ -60,10 +151,16 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 
-  const results = data?.issues || []
+  // Process results: Sort by status and ensure linked issue is present
+  const results = [...(data?.issues || [])].sort((a, b) => {
+    const pA = getStatusPriority(a.fields.status?.name)
+    const pB = getStatusPriority(b.fields.status?.name)
+    return pA - pB
+  })
+  
   const source = data?.source
 
-  // Listen to input changes
+  // Listen to input changes for search
   useEffect(() => {
     if (!titleInput) return
 
@@ -80,7 +177,10 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
     }
 
     const handleFocus = () => setIsFocused(true)
-    const handleBlur = () => setIsFocused(false)
+    const handleBlur = () => {
+      // Small delay to allow clicking on results
+      setTimeout(() => setIsFocused(false), 200)
+    }
 
     // Initial value
     if (titleInput.value) {
@@ -135,8 +235,6 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       updateOpen(true)
     }
     // If we searched API and found nothing, close (or show "No results"?)
-    // User said: "If jira task search result is empty. Then there is no need to give btn... Simplly show no search result found"
-    // So we should probably keep it open to show "No results"
     else if (source === 'api' && results.length === 0) {
       updateOpen(true)
     }
@@ -184,18 +282,54 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
       input.dispatchEvent(new Event('change', { bubbles: true }));
       
       // Blur to commit the change (simulating user leaving the field)
-      // We use a small timeout to ensure events are processed
       setTimeout(() => {
         input.blur()
       }, 0)
     }
-
-    // Update description - REMOVED as per user request
-    // updateDescription(issue.key)
   }
 
   return (
-    <div className="jira-sync-overlay font-sans text-left">
+    <div className="jira-sync-overlay font-sans text-left relative">
+      {/* Status Badge & Dropdown - Only show if we have a linked key */}
+      {linkedKey && linkedIssue && (
+        <div className="absolute right-0 top-[-32px] z-50">
+           <Popover>
+            <PopoverTrigger asChild>
+              <button className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border shadow-sm",
+                linkedIssue.fields.status?.name === 'In Progress' ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" :
+                linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
+                "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+              )}>
+                {transitionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {linkedIssue.fields.status?.name || 'Unknown'}
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-1" align="end">
+              <div className="text-xs font-medium text-muted-foreground px-2 py-1.5 mb-1">
+                Change Status
+              </div>
+              {transitions?.map((t: JiraTransition) => (
+                <button
+                  key={t.id}
+                  onClick={() => transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })}
+                  className="w-full text-left px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between"
+                >
+                  {t.name}
+                  {linkedIssue.fields.status?.name === (t as unknown as { to?: { name: string } }).to?.name && <Check className="h-3 w-3" />}
+                </button>
+              ))}
+              {(!transitions || transitions.length === 0) && (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No transitions available
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+
       <Popover open={open} onOpenChange={setOpen}>
         {/* Invisible trigger that we control programmatically via open state */}
         <PopoverTrigger asChild>
@@ -220,9 +354,21 @@ export default function ContentApp({ titleInput }: { titleInput?: HTMLInputEleme
               <button
                 key={issue.id}
                 onClick={() => handleSelect(issue)}
-                className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors"
+                className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors group"
               >
-                <div className="font-medium text-foreground">{issue.key}</div>
+                <div className="flex items-center justify-between">
+                  <div className="font-medium text-foreground">{issue.key}</div>
+                  {issue.fields.status && (
+                    <span className={cn(
+                      "text-[10px] px-1.5 py-0.5 rounded border",
+                      issue.fields.status.name === 'In Progress' ? "bg-blue-50 text-blue-600 border-blue-100" :
+                      issue.fields.status.name === 'Done' ? "bg-green-50 text-green-600 border-green-100" :
+                      "bg-gray-50 text-gray-500 border-gray-100"
+                    )}>
+                      {issue.fields.status.name}
+                    </span>
+                  )}
+                </div>
                 <div className="text-muted-foreground truncate">{issue.fields.summary}</div>
               </button>
             ))}

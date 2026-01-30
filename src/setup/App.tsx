@@ -26,7 +26,27 @@ function App() {
       return
     }
 
-    setConfig(formData)
+    // Smart URL Handling
+    let domain = formData.jiraDomain.trim().toLowerCase()
+    
+    // Remove protocol
+    domain = domain.replace(/^https?:\/\//, '')
+    
+    // Remove www.
+    domain = domain.replace(/^www\./, '')
+    
+    // Remove trailing slash and paths
+    domain = domain.split('/')[0]
+    
+    // If it doesn't have dots, assume it's the subdomain part of atlassian.net
+    if (!domain.includes('.')) {
+      domain = `${domain}.atlassian.net`
+    }
+
+    // Update state with cleaned domain
+    const cleanedConfig = { ...formData, jiraDomain: domain }
+    setFormData(cleanedConfig)
+    setConfig(cleanedConfig)
     
     setLoadingProjects(true)
     try {

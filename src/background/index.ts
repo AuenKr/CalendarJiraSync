@@ -10,6 +10,8 @@ import type {
   CreateIssuePayload,
   GetIssuePayload,
   UpdateIssueDescriptionPayload,
+  GetTransitionsPayload,
+  TransitionIssuePayload,
 } from "../types/messages"
 
 /* ----------------------------- CONFIG ----------------------------- */
@@ -136,7 +138,7 @@ async function handleMessage(request: MessageRequest) {
       const res =
         await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
           jql,
-          fields: ["summary", "parent"],
+          fields: ["summary", "parent", "status"],
         })
 
       return { issues: res.issues || [] }
@@ -243,7 +245,7 @@ async function handleMessage(request: MessageRequest) {
 
       return client.issues.getIssue({
         issueIdOrKey: issue.key,
-        fields: ["summary", "parent"],
+        fields: ["summary", "parent", "status"],
       })
     }
 
@@ -252,69 +254,35 @@ async function handleMessage(request: MessageRequest) {
       const { issueKey } = payload as GetIssuePayload
       const issue = await client.issues.getIssue({
         issueIdOrKey: issueKey,
-        fields: ["description"]
+        fields: ["description", "status", "summary"]
       })
       return { issue }
+    }
+
+    case "GET_TRANSITIONS": {
+      const client = await getClient()
+      const { issueKey } = payload as GetTransitionsPayload
+      const response = await client.issues.getTransitions({
+        issueIdOrKey: issueKey
+      })
+      return { transitions: response.transitions || [] }
+    }
+
+    case "TRANSITION_ISSUE": {
+      const client = await getClient()
+      const { issueKey, transitionId } = payload as TransitionIssuePayload
+      await client.issues.doTransition({
+        issueIdOrKey: issueKey,
+        transition: {
+          id: transitionId
+        }
+      })
+      return { success: true }
     }
 
     case "UPDATE_ISSUE_DESCRIPTION": {
       const client = await getClient()
       const { issueKey, description } = payload as UpdateIssueDescriptionPayload
-      
-      // Jira API expects description in Atlassian Document Format (ADF) if using v3
-      // But the client might handle string conversion if it's simple text?
-      // Actually, for v3, description is a structured object.
-      // However, if we want to append text, we need to be careful.
-      // Let's assume we are appending simple text for now.
-      // If the existing description is ADF, appending string might fail or need conversion.
-      // For simplicity, let's try to update it as a string if the client supports it, 
-      // or construct a simple ADF paragraph.
-      
-      // Wait, jira.js v3 client expects ADF for description.
-      // We need to construct a valid ADF object.
-      
-      // const adfDescription = {
-      //   type: "doc",
-      //   version: 1,
-      //   content: [
-      //     {
-      //       type: "paragraph",
-      //       content: [
-      //         {
-      //           type: "text",
-      //           text: description
-      //         }
-      //       ]
-      //     }
-      //   ]
-      // }
-
-      // Note: This REPLACES the description. 
-      // To APPEND, we should have fetched the existing one, parsed it, and added to content.
-      // But the requirement says "get and append".
-      // So the caller (popup) should have fetched the existing description, 
-      // concatenated the text (if it was string) or we handle ADF merging here.
-      
-      // Since we are in background, let's handle the update.
-      // But wait, the popup logic I planned was: Get Issue -> Append Text -> Update Issue.
-      // If I do it in popup, I need to handle ADF parsing there? That's complex.
-      // Maybe I should just expose "UPDATE_ISSUE" and let popup send the full new description?
-      // But popup doesn't know ADF.
-      
-      // Let's try to handle it here.
-      // If we receive a string description, we wrap it in ADF.
-      // But if we want to APPEND, we need to know the previous content.
-      
-      // Actually, the user requirement: "When this things will be done. Then a single api call will be made to get and append jira task description with all relevant events details"
-      // This implies the logic should be:
-      // 1. Fetch current issue
-      // 2. Extract current description (which might be ADF)
-      // 3. Append new text
-      // 4. Send update
-      
-      // If the current description is ADF, we need to append a new paragraph to its content array.
-      
-      // Let's implement a smart update here.
       
       const currentIssue = await client.issues.getIssue({
         issueIdOrKey: issueKey,
@@ -336,11 +304,6 @@ async function handleMessage(request: MessageRequest) {
             })
          }
       }
-      
-      // Append our new description as a new paragraph
-      // We can split by newlines to make multiple paragraphs if needed, 
-      // but one big text node with newlines is also valid in a paragraph? 
-      // Actually, ADF text nodes can contain newlines.
       
       newContent.push({
         type: "paragraph",

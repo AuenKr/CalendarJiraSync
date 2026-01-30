@@ -1,5 +1,5 @@
 import Fuse from 'fuse.js'
-import type { Issue, Project, Worklog } from 'jira.js/out/version3/models'
+import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
 import type { 
   MessageType, 
   SearchIssuesPayload, 
@@ -19,12 +19,17 @@ import type {
   GetIssuePayload,
   UpdateIssueDescriptionPayload,
   UpdateIssueDescriptionResponse,
+  GetTransitionsPayload,
+  GetTransitionsResponse,
+  TransitionIssuePayload,
+  TransitionIssueResponse,
 } from '../types/messages'
 
 // Re-export types for UI components
 export type JiraIssue = Issue
 export type JiraProject = Project
 export type JiraWorklog = Worklog
+export type JiraTransition = Transition
 
 export interface SearchResult {
   source: 'local' | 'api'
@@ -121,4 +126,15 @@ export const getIssue = async (issueKey: string): Promise<JiraIssue> => {
 export const updateIssueDescription = async (issueKey: string, description: string): Promise<void> => {
   const payload: UpdateIssueDescriptionPayload = { issueKey, description }
   await sendToBackground<UpdateIssueDescriptionResponse>('UPDATE_ISSUE_DESCRIPTION', payload)
+}
+
+export const getTransitions = async (issueKey: string): Promise<JiraTransition[]> => {
+  const payload: GetTransitionsPayload = { issueKey }
+  const response = await sendToBackground<GetTransitionsResponse>('GET_TRANSITIONS', payload)
+  return response.transitions
+}
+
+export const transitionIssue = async (issueKey: string, transitionId: string): Promise<void> => {
+  const payload: TransitionIssuePayload = { issueKey, transitionId }
+  await sendToBackground<TransitionIssueResponse>('TRANSITION_ISSUE', payload)
 }

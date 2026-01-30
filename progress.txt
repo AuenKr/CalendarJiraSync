@@ -9,3 +9,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Added `onMouseDown={(e) => e.preventDefault()}` to `PopoverContent` to prevent focus loss when interacting with the popover itself (though the main fix is the focus tracking).
 - **Verification**: Verified that the suggestion box closes when clicking outside the input field.
 ---
+
+## 2026-01-30 - US-015
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- **Jira Task Status Management**:
+  - Implemented status display and transition dropdown in `ContentApp.tsx`.
+  - Updated `src/content/index.tsx` to support injecting into the Event Popup (Bubble) by finding the title element when no input is present.
+  - Updated `ContentApp.tsx` to read title from `titleElement` (read-only) if `titleInput` is missing.
+  - Verified sorting logic for search results (In Progress > To Do > Done).
+- **Learnings**:
+  - Google Calendar Event Bubble does not have a title input, so we must read from the title element (e.g., `[role="heading"]`).
+  - `ContentApp` needed to be flexible to handle both input-based (Edit Page) and element-based (Bubble) title sources.
+---

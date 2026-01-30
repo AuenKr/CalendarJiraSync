@@ -1,4 +1,4 @@
-import type { Issue, Project, Worklog } from 'jira.js/out/version3/models'
+import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
 
 export interface UpdateIssueDescriptionPayload {
   issueKey: string
@@ -17,6 +17,23 @@ export interface GetIssueResponse {
   issue: Issue
 }
 
+export interface GetTransitionsPayload {
+  issueKey: string
+}
+
+export interface GetTransitionsResponse {
+  transitions: Transition[]
+}
+
+export interface TransitionIssuePayload {
+  issueKey: string
+  transitionId: string
+}
+
+export interface TransitionIssueResponse {
+  success: boolean
+}
+
 export type MessageType = 
   | 'SEARCH_ISSUES'
   | 'ADD_WORKLOG'
@@ -29,6 +46,8 @@ export type MessageType =
   | 'FETCH_CALENDAR_EVENTS'
   | 'GET_ISSUE'
   | 'UPDATE_ISSUE_DESCRIPTION'
+  | 'GET_TRANSITIONS'
+  | 'TRANSITION_ISSUE'
 
 export interface CalendarEvent {
   id?: string
@@ -94,6 +113,8 @@ export interface MessageRequest {
     | CreateIssuePayload 
     | UpdateIssueDescriptionPayload
     | GetIssuePayload
+    | GetTransitionsPayload
+    | TransitionIssuePayload
     | Record<string, never>
 }
 

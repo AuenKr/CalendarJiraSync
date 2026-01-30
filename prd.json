@@ -206,6 +206,21 @@
       "priority": 14,
       "passes": true,
       "notes": "Preact is lighter and cleaner for content scripts."
+    },
+    {
+      "id": "US-015",
+      "title": "Jira Task Status Management",
+      "description": "View and update the status of a linked Jira task directly from Google Calendar.",
+      "acceptanceCriteria": [
+        "Display current status in Event Popup (Bubble) when title contains Jira key",
+        "Display current status in Edit Event Page when title contains Jira key",
+        "Allow changing status (transitioning the issue) from the UI",
+        "Sort task search results by status: In Progress > To Do > Done",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "From .docs/v2/problem.md"
     }
   ]
 }
