@@ -12,10 +12,33 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('')
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [suggestion, setSuggestion] = useState('')
 
   useEffect(() => {
     setFormData({ jiraDomain, email, apiToken })
   }, [jiraDomain, email, apiToken])
+
+  const handleDomainChange = (val: string) => {
+    setFormData({ ...formData, jiraDomain: val })
+    
+    // Simple heuristic for suggestion
+    // Remove protocol and path first to check the core domain part
+    const clean = val.trim().toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('/')[0]
+
+    if (clean && !clean.includes('.') && clean.length > 1) {
+      setSuggestion(`${clean}.atlassian.net`)
+    } else {
+      setSuggestion('')
+    }
+  }
+
+  const applySuggestion = () => {
+    setFormData({ ...formData, jiraDomain: suggestion })
+    setSuggestion('')
+  }
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -105,14 +128,28 @@ function App() {
               <label className="block text-sm font-medium text-gray-400 mb-2">
                 Jira Domain
               </label>
-              <input
-                type="text"
-                value={formData.jiraDomain}
-                onChange={(e) => setFormData({ ...formData, jiraDomain: e.target.value })}
-                placeholder="your-company.atlassian.net"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                required
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={formData.jiraDomain}
+                  onChange={(e) => handleDomainChange(e.target.value)}
+                  placeholder="your-company.atlassian.net"
+                  className={`w-full bg-gray-700 border border-gray-600 px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all ${suggestion ? 'rounded-t-lg border-b-0' : 'rounded-lg'}`}
+                  required
+                />
+                {suggestion && (
+                  <div 
+                    className="absolute top-full left-0 w-full bg-gray-700 border border-gray-600 rounded-b-lg shadow-lg z-10 cursor-pointer hover:bg-gray-600 transition-colors"
+                    onClick={applySuggestion}
+                  >
+                    <div className="px-4 py-2 text-sm text-gray-300 flex items-center gap-2">
+                      <span>Did you mean</span>
+                      <span className="text-blue-400 font-medium">{suggestion}</span>
+                      <span>?</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>

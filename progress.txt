@@ -45,3 +45,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Learnings**:
   - Jira ADF text nodes support newlines, so constructing a single string with `\n` works for the comment field.
 ---
+
+## 2026-01-30 - US-018
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- **Setup Experience Improvements**:
+  - Updated `src/setup/App.tsx` to include a smart suggestion dropdown for the Jira Domain input.
+  - Implemented logic to detect partial domains (e.g., "company") and suggest the full Atlassian URL ("company.atlassian.net").
+  - Added click handler to apply the suggestion immediately.
+  - Verified flexible input handling in the submit logic (stripping protocol, www, etc.).
+- **Learnings**:
+  - Providing immediate visual feedback (suggestions) improves the user experience significantly compared to just cleaning the input on submit.
+---
