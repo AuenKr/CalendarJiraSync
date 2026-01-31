@@ -123,6 +123,18 @@ export const createIssue = async (projectKey: string, summary: string, parentKey
 }
 
 export const getIssue = async (issueKey: string): Promise<JiraIssue> => {
+  // Try to find in local cache first
+  try {
+    const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
+    const cachedIssue = stored.issues.find(i => i.key === issueKey)
+    if (cachedIssue) {
+      // console.log('[Jira Sync] Found issue in local cache', issueKey)
+      return cachedIssue
+    }
+  } catch (e) {
+    console.warn('Failed to check local cache for issue', e)
+  }
+
   const payload: GetIssuePayload = { issueKey }
   const response = await sendToBackground<GetIssueResponse>('GET_ISSUE', payload)
   return response.issue

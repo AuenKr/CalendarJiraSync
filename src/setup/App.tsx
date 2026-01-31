@@ -20,7 +20,7 @@ function App() {
 
   const handleDomainChange = (val: string) => {
     setFormData({ ...formData, jiraDomain: val })
-    
+
     // Simple heuristic for suggestion
     // Remove protocol and path first to check the core domain part
     const clean = val.trim().toLowerCase()
@@ -43,24 +43,24 @@ function App() {
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    
+
     if (!formData.jiraDomain.trim()) {
-      setError('Jira Domain is required')
+      setError('Jira Domain Url is required')
       return
     }
 
     // Smart URL Handling
     let domain = formData.jiraDomain.trim().toLowerCase()
-    
+
     // Remove protocol
     domain = domain.replace(/^https?:\/\//, '')
-    
+
     // Remove www.
     domain = domain.replace(/^www\./, '')
-    
+
     // Remove trailing slash and paths
     domain = domain.split('/')[0]
-    
+
     // If it doesn't have dots, assume it's the subdomain part of atlassian.net
     if (!domain.includes('.')) {
       domain = `${domain}.atlassian.net`
@@ -70,7 +70,7 @@ function App() {
     const cleanedConfig = { ...formData, jiraDomain: domain }
     setFormData(cleanedConfig)
     setConfig(cleanedConfig)
-    
+
     setLoadingProjects(true)
     try {
       // Test credentials by fetching projects
@@ -103,8 +103,8 @@ function App() {
   }
 
   const filteredProjects = projects
-    .filter((p: JiraProject) => 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    .filter((p: JiraProject) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.key.toLowerCase().includes(searchQuery.toLowerCase())
     )
     .sort((a: JiraProject, b: JiraProject) => {
@@ -121,12 +121,12 @@ function App() {
         <h1 className="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
           Calendar Jira Sync Setup
         </h1>
-        
+
         {step === 1 && (
           <form onSubmit={handleCredentialsSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2">
-                Jira Domain
+                Jira Domain Url
               </label>
               <div className="relative">
                 <input
@@ -138,7 +138,7 @@ function App() {
                   required
                 />
                 {suggestion && (
-                  <div 
+                  <div
                     className="absolute top-full left-0 w-full bg-gray-700 border border-gray-600 rounded-b-lg shadow-lg z-10 cursor-pointer hover:bg-gray-600 transition-colors"
                     onClick={applySuggestion}
                   >
@@ -169,9 +169,9 @@ function App() {
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2 flex justify-between items-center">
                 API Token
-                <a 
-                  href="https://id.atlassian.com/manage-profile/security/api-tokens" 
-                  target="_blank" 
+                <a
+                  href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                  target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
                 >
@@ -231,14 +231,13 @@ function App() {
                 <p className="text-center text-gray-500 text-sm py-4">No spaces found</p>
               )}
               {filteredProjects.map((project: JiraProject) => (
-                <div 
+                <div
                   key={project.key}
                   onClick={() => toggleProject(project.key)}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
-                    selectedProjectKeys.includes(project.key)
-                      ? 'bg-blue-900/30 border-blue-500/50'
-                      : 'bg-gray-700/30 border-gray-700 hover:bg-gray-700/50'
-                  }`}
+                  className={`p-3 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${selectedProjectKeys.includes(project.key)
+                    ? 'bg-blue-900/30 border-blue-500/50'
+                    : 'bg-gray-700/30 border-gray-700 hover:bg-gray-700/50'
+                    }`}
                 >
                   <div className="flex items-center gap-3">
                     {project.avatarUrls?.['24x24'] && (
@@ -270,8 +269,8 @@ function App() {
                 {syncStatus}
               </p>
             )}
-            
-            <button 
+
+            <button
               onClick={() => setStep(1)}
               className="w-full text-gray-400 hover:text-white text-sm mt-2"
             >
