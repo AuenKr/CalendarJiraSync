@@ -1,9 +1,9 @@
 import Fuse from 'fuse.js'
 import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
-import type { 
-  MessageType, 
-  SearchIssuesPayload, 
-  AddWorklogPayload, 
+import type {
+  MessageType,
+  SearchIssuesPayload,
+  AddWorklogPayload,
   UpdateWorklogPayload,
   DeleteWorklogPayload,
   CreateIssuePayload,
@@ -53,17 +53,22 @@ const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise
 
 const TTL = 30 * 60 * 1000; // 30 minutes
 
-export const searchIssues = async (query: string, forceApi = false): Promise<SearchResult> => {
+export const searchIssues = async (query: string, linkedTaskId: string | null, forceApi = false): Promise<SearchResult> => {
+  const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
+  // GetLinkedTask
+  let linkedTask: Issue[] = []
+  if (linkedTaskId) {
+    linkedTask = stored.issues.filter(i => i.key === linkedTaskId)
+  }
+
   // First try to search locally
   if (!forceApi) {
     try {
-      const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
-      
       // Check TTL
       const lastSync = stored.last_sync ? new Date(stored.last_sync).getTime() : 0
       if (Date.now() - lastSync > TTL) {
-         // Trigger background sync (fire and forget)
-         sendToBackground('SYNC_DATA', {})
+        // Trigger background sync (fire and forget)
+        sendToBackground('SYNC_DATA', {})
       }
 
       if (stored.issues && stored.issues.length > 0) {
@@ -72,10 +77,10 @@ export const searchIssues = async (query: string, forceApi = false): Promise<Sea
           threshold: 0.3,
           distance: 100,
         })
-        
+
         const results = fuse.search(query)
         if (results.length > 0) {
-          return { source: 'local', issues: results.map(r => r.item) }
+          return { source: 'local', issues: [...linkedTask, ...results.map(r => r.item)] }
         }
       }
     } catch (e) {
@@ -86,7 +91,7 @@ export const searchIssues = async (query: string, forceApi = false): Promise<Sea
   // Fallback to API
   const payload: SearchIssuesPayload = { query }
   const data = await sendToBackground<SearchIssuesResponse>('SEARCH_ISSUES', payload)
-  return { source: 'api', issues: data.issues }
+  return { source: 'api', issues: [...linkedTask, ...data.issues] }
 }
 
 export const syncData = async (): Promise<SyncDataResponse> => {

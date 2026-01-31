@@ -36,11 +36,11 @@ function getStatusPriority(statusName?: string): number {
   return STATUS_PRIORITY[statusName] || 99
 }
 
-export default function ContentApp({ 
+export default function ContentApp({
   titleInput: initialInput,
   titleElement,
   container
-}: { 
+}: {
   titleInput?: HTMLInputElement,
   titleElement?: HTMLElement,
   container?: HTMLElement
@@ -67,21 +67,21 @@ export default function ContentApp({
       const root = container || document
 
       // Check active element first - if user is typing, this is the one we want!
-      if (document.activeElement && 
-          (document.activeElement.getAttribute('aria-label') === 'Add title' || 
-           document.activeElement.getAttribute('aria-label') === 'Title')) {
-         const active = document.activeElement as HTMLInputElement
-         if (active !== titleInput) {
-            // console.log('[Jira Sync] Found active title input', active)
-            setTitleInput(active)
-            return
-         }
+      if (document.activeElement &&
+        (document.activeElement.getAttribute('aria-label') === 'Add title' ||
+          document.activeElement.getAttribute('aria-label') === 'Title')) {
+        const active = document.activeElement as HTMLInputElement
+        if (active !== titleInput) {
+          // console.log('[Jira Sync] Found active title input', active)
+          setTitleInput(active)
+          return
+        }
       }
 
-      const input = root.querySelector('input[aria-label="Add title"]') || 
-                    root.querySelector('input[aria-label="Title"]') ||
-                    root.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
-      
+      const input = root.querySelector('input[aria-label="Add title"]') ||
+        root.querySelector('input[aria-label="Title"]') ||
+        root.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
+
       if (input && input !== titleInput) {
         // console.log('[Jira Sync] Found new title input', input)
         setTitleInput(input as HTMLInputElement)
@@ -93,14 +93,14 @@ export default function ContentApp({
     // Global focus listener to catch inputs even if they are not found by selectors initially
     const handleGlobalFocus = (e: FocusEvent) => {
       const target = e.target as HTMLElement
-      if (target instanceof HTMLInputElement && 
-          (target.getAttribute('aria-label') === 'Add title' || 
-           target.getAttribute('aria-label') === 'Title' ||
-           target.getAttribute('aria-label') === 'Add title and time')) { // Added 'Add title and time' for quick add bubble
-         if (target !== titleInput) {
-           // console.log('[Jira Sync] Detected focus on new title input', target)
-           setTitleInput(target)
-         }
+      if (target instanceof HTMLInputElement &&
+        (target.getAttribute('aria-label') === 'Add title' ||
+          target.getAttribute('aria-label') === 'Title' ||
+          target.getAttribute('aria-label') === 'Add title and time')) { // Added 'Add title and time' for quick add bubble
+        if (target !== titleInput) {
+          // console.log('[Jira Sync] Detected focus on new title input', target)
+          setTitleInput(target)
+        }
       }
     }
 
@@ -131,7 +131,7 @@ export default function ContentApp({
     }
 
     checkKey()
-    
+
     if (titleInput) {
       const handleInput = () => checkKey()
       titleInput.addEventListener('input', handleInput)
@@ -181,7 +181,7 @@ export default function ContentApp({
   // Search Queries
   const { data, isLoading: loading } = useQuery({
     queryKey: ['issues', debouncedQuery, forceApi],
-    queryFn: () => searchIssues(debouncedQuery, forceApi),
+    queryFn: () => searchIssues(debouncedQuery, linkedKey, forceApi),
     enabled: debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
@@ -192,7 +192,7 @@ export default function ContentApp({
     const pB = getStatusPriority(b.fields.status?.name)
     return pA - pB
   })
-  
+
   const source = data?.source
 
   // Listen to input changes for search
@@ -265,7 +265,7 @@ export default function ContentApp({
     // If we have results, open
     if (results.length > 0) {
       updateOpen(true)
-    } 
+    }
     // If we are loading, open
     else if (loading) {
       updateOpen(true)
@@ -294,7 +294,7 @@ export default function ContentApp({
       // Check if there is already a key at the start
       const currentVal = input.value
       const keyMatch = currentVal.match(/^\[?([A-Z]+-\d+)\]?\s*/)
-      
+
       let newValue = ''
       if (keyMatch) {
         // Replace existing key
@@ -303,9 +303,9 @@ export default function ContentApp({
         // Prepend new key
         const trimmedVal = currentVal.trim()
         if (trimmedVal) {
-           newValue = `[${issue.key}] ${trimmedVal}`
+          newValue = `[${issue.key}] ${trimmedVal}`
         } else {
-           newValue = `[${issue.key}] ${issue.fields.summary}`
+          newValue = `[${issue.key}] ${issue.fields.summary}`
         }
       }
 
@@ -320,7 +320,7 @@ export default function ContentApp({
       // Dispatch events to trigger listeners
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      
+
       // Blur to commit the change (simulating user leaving the field)
       setTimeout(() => {
         input.blur()
@@ -333,13 +333,13 @@ export default function ContentApp({
       {/* Status Badge & Dropdown - Only show if we have a linked key */}
       {linkedKey && linkedIssue && (
         <div className="absolute right-0 top-[-32px] z-50">
-           <Popover>
+          <Popover>
             <PopoverTrigger asChild>
               <button className={cn(
                 "flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border shadow-sm",
                 linkedIssue.fields.status?.name === 'In Progress' ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" :
-                linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
-                "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+                  linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
+                    "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
               )}>
                 {transitionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                 {linkedIssue.fields.status?.name || 'Unknown'}
@@ -402,8 +402,8 @@ export default function ContentApp({
                     <span className={cn(
                       "text-[10px] px-1.5 py-0.5 rounded border",
                       issue.fields.status.name === 'In Progress' ? "bg-blue-50 text-blue-600 border-blue-100" :
-                      issue.fields.status.name === 'Done' ? "bg-green-50 text-green-600 border-green-100" :
-                      "bg-gray-50 text-gray-500 border-gray-100"
+                        issue.fields.status.name === 'Done' ? "bg-green-50 text-green-600 border-green-100" :
+                          "bg-gray-50 text-gray-500 border-gray-100"
                     )}>
                       {issue.fields.status.name}
                     </span>
