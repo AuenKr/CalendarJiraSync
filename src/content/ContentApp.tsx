@@ -332,17 +332,19 @@ export default function ContentApp({
     <div className="jira-sync-overlay font-sans text-left relative">
       {/* Status Badge & Dropdown - Only show if we have a linked key */}
       {linkedKey && linkedIssue && (
-        <div className="absolute right-0 top-[-32px] z-50">
+        <div className="absolute right-0 -top-8 z-50">
           <Popover>
             <PopoverTrigger asChild>
-              <button className={cn(
-                "flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors border shadow-sm",
-                linkedIssue.fields.status?.name === 'In Progress' ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" :
-                  linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
-                    "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
-              )}>
+              <button
+                className={cn(
+                  "flex items-center gap-1.5 p-1 w-25 rounded-sm mt-7 text-xs justify-between font-medium transition-colors border shadow-sm hover:cursor-pointer",
+                  linkedIssue.fields.status?.name === 'In Progress' ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" :
+                    linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
+                      "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+                )}
+              >
                 {transitionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                {linkedIssue.fields.status?.name || 'Unknown'}
+                <span className="truncate">{linkedIssue.fields.status?.name || 'Unknown'}</span>
                 <ChevronDown className="h-3 w-3 opacity-50" />
               </button>
             </PopoverTrigger>
@@ -353,7 +355,11 @@ export default function ContentApp({
               {transitions?.map((t: JiraTransition) => (
                 <button
                   key={t.id}
-                  onClick={() => transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })
+                  }}
                   className="w-full text-left px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between"
                 >
                   {t.name}
@@ -376,7 +382,7 @@ export default function ContentApp({
           <div className="w-full h-0" />
         </PopoverTrigger>
         <PopoverContent
-          className="w-[400px] p-0 border-border"
+          className="w-100 p-0 border-border"
           align="start"
           side="bottom"
           sideOffset={10}
