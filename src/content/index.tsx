@@ -27,10 +27,19 @@ function injectApp(modal: Element) {
 
   // Try to find the title input to inject after it
   // Google Calendar classes are obfuscated, so we look for structure or aria-labels
-  const titleInput = modal.querySelector('input[aria-label="Add title"]') || 
+  let titleInput = modal.querySelector('input[aria-label="Add title"]') || 
                      modal.querySelector('input[aria-label="Title"]') ||
                      modal.querySelector('input[type="text"]') ||
-                     modal.querySelector('#xTiIn') // Full edit page title input ID
+                     modal.querySelector('#xTiIn') as Element | null // Full edit page title input ID
+
+  // Check if modal itself is the input (e.g. if observer passed the input directly)
+  if (!titleInput && modal instanceof HTMLInputElement) {
+    if (modal.id === 'xTiIn' || 
+        modal.getAttribute('aria-label') === 'Add title' || 
+        modal.getAttribute('aria-label') === 'Title') {
+      titleInput = modal
+    }
+  }
 
   let titleElement: HTMLElement | undefined
   if (!titleInput) {
@@ -231,7 +240,12 @@ const observer = new MutationObserver((mutations) => {
           }
           
           // Check for full page edit container
-          if (node.id === 'xTiIn' || node.classList.contains('p9lUpf')) {
+          if (node.id === 'xTiIn') {
+             // If we found the input directly, pass its parent
+             if (node.parentElement) injectApp(node.parentElement)
+             return
+          }
+          if (node.classList.contains('p9lUpf')) {
              injectApp(node)
              return
           }
