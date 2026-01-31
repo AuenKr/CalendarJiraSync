@@ -41,6 +41,11 @@ function injectApp(modal: Element) {
                     (modal.querySelector('.gUD7Lf') as HTMLElement)
   }
 
+  if (!titleInput && !titleElement) {
+    // console.log('[Calendar Jira Sync] No title input or element found. Aborting injection.')
+    return
+  }
+
   let injected = false
 
   if (titleInput && titleInput.parentElement) {
