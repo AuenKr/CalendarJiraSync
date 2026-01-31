@@ -330,8 +330,8 @@ export default function ContentApp({
 
   return (
     <div className="jira-sync-overlay font-sans text-left relative">
-      {/* Status Badge & Dropdown - Only show if we have a linked key */}
-      {linkedKey && linkedIssue && (
+      {/* Status Badge & Dropdown - Only show if we have a linked key AND we are in Bubble view (titleElement exists) */}
+      {linkedKey && linkedIssue && titleElement && (
         <div className="absolute right-0 -top-8 z-50">
           <Popover>
             <PopoverTrigger asChild>
