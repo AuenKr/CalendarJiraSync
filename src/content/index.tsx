@@ -210,19 +210,30 @@ const observer = new MutationObserver((mutations) => {
           if (dialog) {
             // console.log('[Calendar Jira Sync] Detected dialog inside added node', dialog)
             injectApp(dialog)
+            return // Found a dialog, stop checking this node
           }
           
           // Also check for the "event edit" container which might not be a dialog in some views
           // Class 'yDmH0d' is often used for the event bubble
-          if (node.classList.contains('yDmH0d') || node.querySelector('.yDmH0d')) {
-             // console.log('[Calendar Jira Sync] Detected event bubble', node)
+          if (node.classList.contains('yDmH0d')) {
              injectApp(node)
+             return
+          }
+          const bubble = node.querySelector('.yDmH0d')
+          if (bubble) {
+             injectApp(bubble)
+             return
           }
           
           // Check for full page edit container
-          if (node.querySelector('#xTiIn') || node.querySelector('.p9lUpf')) {
-             // console.log('[Calendar Jira Sync] Detected full edit page', node)
+          if (node.id === 'xTiIn' || node.classList.contains('p9lUpf')) {
              injectApp(node)
+             return
+          }
+          const fullEdit = node.querySelector('#xTiIn') || node.querySelector('.p9lUpf')
+          if (fullEdit) {
+             injectApp(fullEdit)
+             return
           }
         }
       }
