@@ -46,6 +46,7 @@ export default function ContentApp({
   container?: HTMLElement
 }) {
   const [titleInput, setTitleInput] = useState<HTMLInputElement | undefined>(initialInput)
+  const [titleEl, setTitleEl] = useState<HTMLElement | undefined>(titleElement)
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebounce(query, 300)
   const [open, setOpen] = useState(false)
@@ -53,6 +54,33 @@ export default function ContentApp({
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
   const [linkedKey, setLinkedKey] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Update titleEl if prop changes
+  useEffect(() => {
+    setTitleEl(titleElement)
+  }, [titleElement])
+
+  // Poll for title element if we are in "Bubble view" (i.e. not editing with input)
+  useEffect(() => {
+    if (titleInput) return // We are in edit mode, different logic
+    
+    const findTitle = () => {
+       if (titleEl && titleEl.isConnected) return
+       
+       // Try to find it again
+       const root = container || document
+       const newEl = (root.querySelector('[role="heading"]') as HTMLElement) ||
+                     (root.querySelector('.JAPzS') as HTMLElement) ||
+                     (root.querySelector('.gUD7Lf') as HTMLElement)
+       
+       if (newEl && newEl !== titleEl) {
+         setTitleEl(newEl)
+       }
+    }
+    
+    const interval = setInterval(findTitle, 500)
+    return () => clearInterval(interval)
+  }, [titleEl, titleInput, container])
 
   // Robust Input Detection
   useEffect(() => {
@@ -118,8 +146,8 @@ export default function ContentApp({
       let value = ''
       if (titleInput) {
         value = titleInput.value
-      } else if (titleElement) {
-        value = titleElement.textContent || ''
+      } else if (titleEl) {
+        value = titleEl.textContent || ''
       }
 
       const match = value.match(/^\[?([A-Z]+-\d+)\]?/)
@@ -143,13 +171,13 @@ export default function ContentApp({
         titleInput.removeEventListener('change', handleInput)
         titleInput.removeEventListener('keyup', handleInput)
       }
-    } else if (titleElement) {
+    } else if (titleEl) {
       // Observe changes to title element text
       const observer = new MutationObserver(checkKey)
-      observer.observe(titleElement, { childList: true, characterData: true, subtree: true })
+      observer.observe(titleEl, { childList: true, characterData: true, subtree: true })
       return () => observer.disconnect()
     }
-  }, [titleInput, titleElement])
+  }, [titleInput, titleEl])
 
   // Fetch linked issue details (status)
   const { data: linkedIssue, refetch: refetchLinkedIssue } = useQuery({
@@ -331,7 +359,7 @@ export default function ContentApp({
   return (
     <div className="jira-sync-overlay font-sans text-left relative">
       {/* Status Badge & Dropdown - Only show if we have a linked key AND we are in Bubble view (titleElement exists) */}
-      {linkedKey && linkedIssue && titleElement && (
+      {linkedKey && linkedIssue && titleEl && (
         <div className="absolute right-0 -top-8 z-50">
           <Popover>
             <PopoverTrigger asChild>

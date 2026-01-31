@@ -23,7 +23,7 @@ function injectApp(modal: Element) {
   // Ensure high z-index to be above Google Calendar modals
   host.style.position = 'relative'
   host.style.zIndex = '9999'
-  host.style.marginTop = '8px' // Add some spacing
+  // host.style.marginTop = '8px' // Removed to prevent layout issues with date field
 
   // Try to find the title input to inject after it
   // Google Calendar classes are obfuscated, so we look for structure or aria-labels
