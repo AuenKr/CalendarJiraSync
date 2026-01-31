@@ -54,7 +54,10 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
   // GetLinkedTask
   let linkedTask: Issue[] = []
   if (linkedTaskId) {
-    linkedTask = stored.issues.filter(i => i.key === linkedTaskId)
+    const found = stored.issues.find(i => i.key === linkedTaskId)
+    if (found) {
+      linkedTask = [found]
+    }
   }
 
   // First try to search locally
@@ -76,7 +79,10 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
 
         const results = fuse.search(query)
         if (results.length > 0) {
-          return { source: 'local', issues: [...linkedTask, ...results.map(r => r.item)] }
+          const searchResult = results
+            .map(r => r.item)
+            .filter(item => item.key !== linkedTaskId)
+          return { source: 'local', issues: [...linkedTask, ...searchResult] }
         }
       }
     } catch (e) {
@@ -87,7 +93,20 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
   // Fallback to API
   const payload: SearchIssuesPayload = { query }
   const data = await sendToBackground<SearchIssuesResponse>('SEARCH_ISSUES', payload)
-  return { source: 'api', issues: [...linkedTask, ...data.issues] }
+
+  let apiIssues = data.issues
+  if (linkedTask.length === 0 && linkedTaskId) {
+    const foundInApi = apiIssues.find(i => i.key === linkedTaskId)
+    if (foundInApi) {
+      linkedTask = [foundInApi]
+    }
+  }
+
+  // Filter linked task out of API results so we don't show it twice
+  apiIssues = apiIssues.filter(each => each.key !== linkedTaskId)
+  return {
+    source: 'api', issues: [...linkedTask, ...apiIssues]
+  }
 }
 
 export const syncData = async (): Promise<SyncDataResponse> => {
