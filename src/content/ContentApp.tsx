@@ -38,10 +38,12 @@ function getStatusPriority(statusName?: string): number {
 
 export default function ContentApp({ 
   titleInput: initialInput,
-  titleElement
+  titleElement,
+  container
 }: { 
   titleInput?: HTMLInputElement,
-  titleElement?: HTMLElement
+  titleElement?: HTMLElement,
+  container?: HTMLElement
 }) {
   const [titleInput, setTitleInput] = useState<HTMLInputElement | undefined>(initialInput)
   const [query, setQuery] = useState('')
@@ -62,9 +64,23 @@ export default function ContentApp({
 
     // Otherwise, try to find the active title input
     const findInput = () => {
-      const input = document.querySelector('input[aria-label="Add title"]') || 
-                    document.querySelector('input[aria-label="Title"]') ||
-                    document.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
+      const root = container || document
+
+      // Check active element first - if user is typing, this is the one we want!
+      if (document.activeElement && 
+          (document.activeElement.getAttribute('aria-label') === 'Add title' || 
+           document.activeElement.getAttribute('aria-label') === 'Title')) {
+         const active = document.activeElement as HTMLInputElement
+         if (active !== titleInput) {
+            // console.log('[Jira Sync] Found active title input', active)
+            setTitleInput(active)
+            return
+         }
+      }
+
+      const input = root.querySelector('input[aria-label="Add title"]') || 
+                    root.querySelector('input[aria-label="Title"]') ||
+                    root.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
       
       if (input && input !== titleInput) {
         // console.log('[Jira Sync] Found new title input', input)
@@ -73,9 +89,9 @@ export default function ContentApp({
     }
 
     findInput()
-    const interval = setInterval(findInput, 1000) // Poll every second to ensure we have the valid input
+    const interval = setInterval(findInput, 500) // Poll faster (500ms)
     return () => clearInterval(interval)
-  }, [titleInput, titleElement])
+  }, [titleInput, titleElement, container])
 
   // Extract linked key from input or element
   useEffect(() => {

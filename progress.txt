@@ -56,3 +56,17 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Learnings**:
   - Providing immediate visual feedback (suggestions) improves the user experience significantly compared to just cleaning the input on submit.
 ---
+
+## 2026-01-31 - US-019
+Thread: https://ampcode.com/threads/
+- **Fix Reload Focus Issue**:
+  - Updated `src/content/index.tsx` to pass the `modal` container to `ContentApp`.
+  - Updated `src/content/ContentApp.tsx` to:
+    - Accept `container` prop and search for input within it.
+    - Prioritize `document.activeElement` if it matches the title input criteria.
+    - Increased polling frequency to 500ms.
+  - Verified build and lint pass.
+- **Learnings**:
+  - **Google Calendar Injection**: When injecting into a dynamic SPA like Google Calendar, always check `document.activeElement` to find the input the user is currently interacting with, as the DOM might have multiple inputs or be in a state of flux.
+  - **Content Script Polling**: Increasing polling frequency (e.g. 500ms) and scoping searches to the specific modal container improves robustness.
+---

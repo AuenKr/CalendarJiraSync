@@ -186,6 +186,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           <ContentApp 
             titleInput={titleInput as HTMLInputElement} 
             titleElement={titleElement}
+            container={modal as HTMLElement}
           />
         </QueryClientProvider>
       </StrictMode>
