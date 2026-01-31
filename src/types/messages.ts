@@ -1,14 +1,5 @@
 import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
 
-export interface UpdateIssueDescriptionPayload {
-  issueKey: string
-  description: string
-}
-
-export interface UpdateIssueDescriptionResponse {
-  success: boolean
-}
-
 export interface GetIssuePayload {
   issueKey: string
 }
@@ -40,12 +31,10 @@ export type MessageType =
   | 'UPDATE_WORKLOG'
   | 'DELETE_WORKLOG'
   | 'GET_PROJECTS'
-  | 'CREATE_ISSUE'
   | 'SYNC_DATA'
   | 'GET_STORED_ISSUES'
   | 'FETCH_CALENDAR_EVENTS'
   | 'GET_ISSUE'
-  | 'UPDATE_ISSUE_DESCRIPTION'
   | 'GET_TRANSITIONS'
   | 'TRANSITION_ISSUE'
 
@@ -97,12 +86,6 @@ export interface DeleteWorklogPayload {
   worklogId: string
 }
 
-export interface CreateIssuePayload {
-  projectKey: string
-  summary: string
-  parentKey?: string
-}
-
 export interface MessageRequest {
   type: MessageType
   payload: 
@@ -110,8 +93,6 @@ export interface MessageRequest {
     | AddWorklogPayload 
     | UpdateWorklogPayload 
     | DeleteWorklogPayload 
-    | CreateIssuePayload 
-    | UpdateIssueDescriptionPayload
     | GetIssuePayload
     | GetTransitionsPayload
     | TransitionIssuePayload
@@ -127,5 +108,3 @@ export type UpdateWorklogResponse = Worklog
 export type DeleteWorklogResponse = void
 
 export type GetProjectsResponse = Project[]
-
-export type CreateIssueResponse = Issue

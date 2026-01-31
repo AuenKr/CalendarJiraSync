@@ -7,9 +7,7 @@ import type {
   AddWorklogPayload,
   UpdateWorklogPayload,
   DeleteWorklogPayload,
-  CreateIssuePayload,
   GetIssuePayload,
-  UpdateIssueDescriptionPayload,
   GetTransitionsPayload,
   TransitionIssuePayload,
 } from "../types/messages"
@@ -229,26 +227,6 @@ async function handleMessage(request: MessageRequest) {
       return allProjects
     }
 
-    case "CREATE_ISSUE": {
-      const client = await getClient()
-      const { projectKey, summary, parentKey } =
-        payload as CreateIssuePayload
-
-      const issue = await client.issues.createIssue({
-        fields: {
-          project: { key: projectKey },
-          summary,
-          issuetype: { name: parentKey ? "Sub-task" : "Task" },
-          parent: parentKey ? { key: parentKey } : undefined,
-        },
-      })
-
-      return client.issues.getIssue({
-        issueIdOrKey: issue.key,
-        fields: ["summary", "parent", "status"],
-      })
-    }
-
     case "GET_ISSUE": {
       const client = await getClient()
       const { issueKey } = payload as GetIssuePayload
@@ -300,50 +278,6 @@ async function handleMessage(request: MessageRequest) {
         console.error("Failed to update local cache after transition", e)
       }
 
-      return { success: true }
-    }
-
-    case "UPDATE_ISSUE_DESCRIPTION": {
-      const client = await getClient()
-      const { issueKey, description } = payload as UpdateIssueDescriptionPayload
-      
-      const currentIssue = await client.issues.getIssue({
-        issueIdOrKey: issueKey,
-        fields: ["description"]
-      })
-      
-      let newContent: Record<string, unknown>[] = []
-      
-      if (currentIssue.fields.description) {
-         // If it's ADF (object)
-         if (typeof currentIssue.fields.description === 'object' && currentIssue.fields.description.content) {
-            newContent = [...currentIssue.fields.description.content]
-         } 
-         // If it's string (v2 or legacy)
-         else if (typeof currentIssue.fields.description === 'string') {
-            newContent.push({
-              type: "paragraph",
-              content: [{ type: "text", text: currentIssue.fields.description }]
-            })
-         }
-      }
-      
-      newContent.push({
-        type: "paragraph",
-        content: [{ type: "text", text: description }]
-      })
-      
-      await client.issues.editIssue({
-        issueIdOrKey: issueKey,
-        fields: {
-          description: {
-            type: "doc",
-            version: 1,
-            content: newContent
-          }
-        }
-      })
-      
       return { success: true }
     }
 

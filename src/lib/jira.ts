@@ -6,19 +6,12 @@ import type {
   AddWorklogPayload,
   UpdateWorklogPayload,
   DeleteWorklogPayload,
-  CreateIssuePayload,
-  SearchIssuesResponse,
-  AddWorklogResponse,
-  UpdateWorklogResponse,
   DeleteWorklogResponse,
   GetProjectsResponse,
-  CreateIssueResponse,
   SyncDataResponse,
   GetStoredIssuesResponse,
   GetIssueResponse,
   GetIssuePayload,
-  UpdateIssueDescriptionPayload,
-  UpdateIssueDescriptionResponse,
   GetTransitionsPayload,
   GetTransitionsResponse,
   TransitionIssuePayload,
@@ -117,11 +110,6 @@ export const getProjects = async (): Promise<JiraProject[]> => {
   return await sendToBackground<GetProjectsResponse>('GET_PROJECTS', {})
 }
 
-export const createIssue = async (projectKey: string, summary: string, parentKey?: string): Promise<JiraIssue> => {
-  const payload: CreateIssuePayload = { projectKey, summary, parentKey }
-  return await sendToBackground<CreateIssueResponse>('CREATE_ISSUE', payload)
-}
-
 export const getIssue = async (issueKey: string): Promise<JiraIssue> => {
   // Try to find in local cache first
   try {
@@ -138,11 +126,6 @@ export const getIssue = async (issueKey: string): Promise<JiraIssue> => {
   const payload: GetIssuePayload = { issueKey }
   const response = await sendToBackground<GetIssueResponse>('GET_ISSUE', payload)
   return response.issue
-}
-
-export const updateIssueDescription = async (issueKey: string, description: string): Promise<void> => {
-  const payload: UpdateIssueDescriptionPayload = { issueKey, description }
-  await sendToBackground<UpdateIssueDescriptionResponse>('UPDATE_ISSUE_DESCRIPTION', payload)
 }
 
 export const getTransitions = async (issueKey: string): Promise<JiraTransition[]> => {
