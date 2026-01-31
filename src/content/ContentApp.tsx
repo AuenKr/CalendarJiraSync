@@ -90,7 +90,26 @@ export default function ContentApp({
 
     findInput()
     const interval = setInterval(findInput, 500) // Poll faster (500ms)
-    return () => clearInterval(interval)
+    // Global focus listener to catch inputs even if they are not found by selectors initially
+    const handleGlobalFocus = (e: FocusEvent) => {
+      const target = e.target as HTMLElement
+      if (target instanceof HTMLInputElement && 
+          (target.getAttribute('aria-label') === 'Add title' || 
+           target.getAttribute('aria-label') === 'Title' ||
+           target.getAttribute('aria-label') === 'Add title and time')) { // Added 'Add title and time' for quick add bubble
+         if (target !== titleInput) {
+           // console.log('[Jira Sync] Detected focus on new title input', target)
+           setTitleInput(target)
+         }
+      }
+    }
+
+    document.addEventListener('focus', handleGlobalFocus, true) // Capture phase
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('focus', handleGlobalFocus, true)
+    }
   }, [titleInput, titleElement, container])
 
   // Extract linked key from input or element
@@ -205,6 +224,11 @@ export default function ContentApp({
       if (query !== val) {
         setTimeout(() => setQuery(val), 0)
       }
+    }
+
+    // Check if already focused (crucial for reload/autofocus scenarios)
+    if (document.activeElement === titleInput) {
+      setTimeout(() => setIsFocused(true), 0)
     }
 
     titleInput.addEventListener('input', handleInput)
