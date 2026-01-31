@@ -277,6 +277,29 @@ async function handleMessage(request: MessageRequest) {
           id: transitionId
         }
       })
+
+      // Update local cache
+      try {
+        const updatedIssue = await client.issues.getIssue({
+          issueIdOrKey: issueKey,
+          fields: ["summary", "parent", "status", "project"]
+        })
+
+        const data = await chrome.storage.local.get("synced_issues")
+        const issues = (data.synced_issues || []) as Issue[]
+        
+        const index = issues.findIndex(i => i.key === issueKey)
+        if (index !== -1) {
+          issues[index] = updatedIssue
+        } else {
+          issues.push(updatedIssue)
+        }
+
+        await chrome.storage.local.set({ synced_issues: issues })
+      } catch (e) {
+        console.error("Failed to update local cache after transition", e)
+      }
+
       return { success: true }
     }
 
