@@ -83,6 +83,23 @@ function releaseTagExists(nameWithOwner, tag) {
   }
 }
 
+function getCommitMessagesSinceTag(tag) {
+  try {
+    const output = run(`git log "${tag}..HEAD" --pretty=format:%s`, {
+      capture: true,
+    }).trim()
+
+    if (!output) return []
+
+    return output
+      .split('\n')
+      .map((message) => message.trim())
+      .filter(Boolean)
+  } catch (_) {
+    return []
+  }
+}
+
 function main() {
   ensurePrerequisites()
 
@@ -91,6 +108,11 @@ function main() {
   const nameWithOwner = getRepoNameWithOwner()
   const version = nextTag.slice(1)
   const zipFile = `${RELEASE_DIR}/calendar-jira-sync-v${version}.zip`
+  const commitMessages = getCommitMessagesSinceTag(latestTag)
+  const commitsSection = commitMessages.length
+    ? commitMessages.map((message) => `- ${message}`).join('\n')
+    : '- No commits found since previous release'
+  const notes = `Automated release ${nextTag}\n\nCommits since ${latestTag}:\n${commitsSection}`
 
   console.log(`[release] Latest tag: ${latestTag}`)
   console.log(`[release] Next tag: ${nextTag}`)
@@ -122,7 +144,7 @@ function main() {
 
   run(`git tag "${nextTag}"`)
   run(`git push origin "${nextTag}"`)
-  run(`gh release create "${nextTag}" "${zipFile}" --title "${nextTag}" --notes "Automated release ${nextTag}"`)
+  run(`gh release create "${nextTag}" "${zipFile}" --title "${nextTag}" --notes ${JSON.stringify(notes)}`)
 
   console.log(`[release] Published ${nextTag} with asset ${zipFile}`)
 }
