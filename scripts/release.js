@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 
 const RELEASE_DIR = 'release'
@@ -142,9 +142,17 @@ function main() {
   run(`rm -f "${zipFile}"`)
   run(`zip -r "${zipFile}" "${DIST_DIR}"`)
 
+  const notesFile = `${RELEASE_DIR}/.release-notes-${nextTag}.md`
+  writeFileSync(notesFile, notes, 'utf-8')
+
   run(`git tag "${nextTag}"`)
   run(`git push origin "${nextTag}"`)
-  run(`gh release create "${nextTag}" "${zipFile}" --title "${nextTag}" --notes ${JSON.stringify(notes)}`)
+
+  try {
+    run(`gh release create "${nextTag}" "${zipFile}" --title "${nextTag}" --notes-file "${notesFile}"`)
+  } finally {
+    rmSync(notesFile, { force: true })
+  }
 
   console.log(`[release] Published ${nextTag} with asset ${zipFile}`)
 }
