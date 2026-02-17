@@ -60,7 +60,7 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
     }
   }
 
-  // First try to search locally
+  // Search local cache first unless explicitly forcing API search
   if (!forceApi) {
     try {
       // Check TTL
@@ -78,15 +78,16 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
         })
 
         const results = fuse.search(query)
-        if (results.length > 0) {
-          const searchResult = results
-            .map(r => r.item)
-            .filter(item => item.key !== linkedTaskId)
-          return { source: 'local', issues: [...linkedTask, ...searchResult] }
-        }
+        const searchResult = results
+          .map(r => r.item)
+          .filter(item => item.key !== linkedTaskId)
+        return { source: 'local', issues: [...linkedTask, ...searchResult] }
       }
+
+      return { source: 'local', issues: linkedTask }
     } catch (e) {
-      console.warn('Local search failed, falling back to API', e)
+      console.warn('Local search failed', e)
+      return { source: 'local', issues: linkedTask }
     }
   }
 

@@ -136,14 +136,11 @@ function App() {
                }
             }
 
-            // New Comment Format: [Title] \n[Date]\n[Start Time] - [End Time]\n[Event Description]
-            const dateStr = startTime.toLocaleDateString()
-            const timeRange = `${startTime.toLocaleTimeString()} - ${endTime.toLocaleTimeString()}`
-            const cleanTitle = event.title.replace(/\[?[A-Z]+-\d+\]?\s*/, '').trim()
-            
-            let comment = `[${cleanTitle}]\n${dateStr}\n${timeRange}`
-            if (description) {
-              comment += `\n\n${description}`
+            const startStr = startTime.toLocaleTimeString()
+            const endStr = endTime.toLocaleTimeString()
+            let comment = `Start: ${startStr}\nEnd: ${endStr}`
+            if (description?.trim()) {
+              comment += `\n\n${description.trim()}`
             }
             
             // Format date for Jira (replace Z with +0000 to ensure compatibility)

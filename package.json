@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && vite build -c vite.content.config.ts && bun scripts/patch-manifest.js",
+    "release:verify": "bun scripts/release.js --verify",
+    "release": "bun scripts/release.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview"

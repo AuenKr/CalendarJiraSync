@@ -76,8 +76,7 @@ async function syncData() {
   let issues: Issue[] = []
 
   if (selectedProjectKeys.length) {
-    // JQL: (project in (KEY1, KEY2) OR assignee = currentUser()) AND updated >= -30d ORDER BY updated DESC
-    const jql = `(project in (${selectedProjectKeys.join(',')}) OR assignee = "${myself.accountId}") AND updated >= -30d ORDER BY updated DESC`
+    const jql = `(assignee = "${myself.accountId}" OR (project in (${selectedProjectKeys.join(',')}) AND assignee is EMPTY)) AND updated >= -30d ORDER BY updated DESC`
     
     let nextPageToken: string | undefined = undefined
     let isLast = false
@@ -101,7 +100,7 @@ async function syncData() {
   } else {
     const res =
       await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
-        jql: `assignee = "${myself.accountId}" ORDER BY updated DESC`,
+        jql: `assignee = "${myself.accountId}" AND updated >= -30d ORDER BY updated DESC`,
         fields: ["summary", "parent", "status", "project"],
         maxResults: 100,
       })

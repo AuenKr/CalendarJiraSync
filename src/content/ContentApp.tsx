@@ -19,9 +19,188 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-// Helper to set input value to avoid linter error about prop mutation
-function setInputValue(input: HTMLInputElement, value: string) {
-  input.value = value
+function setTextControlValue(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const proto = input instanceof HTMLTextAreaElement
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+  if (setter) {
+    setter.call(input, value)
+  } else {
+    input.value = value
+  }
+}
+
+function getEditorValue(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement): string {
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+    return editor.value || ''
+  }
+  return editor.textContent || ''
+}
+
+function dispatchEditorChangeEvents(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement) {
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
+  editor.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+function setEditorValue(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement, value: string) {
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+    setTextControlValue(editor, value)
+  } else {
+    editor.textContent = value
+  }
+  dispatchEditorChangeEvents(editor)
+}
+
+function setContentEditableCaret(el: HTMLElement, position: number) {
+  const selection = window.getSelection()
+  if (!selection) return
+
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let remaining = position
+  let targetNode: Node | null = null
+  let targetOffset = 0
+
+  while (walker.nextNode()) {
+    const current = walker.currentNode
+    const textLength = current.textContent?.length || 0
+    if (remaining <= textLength) {
+      targetNode = current
+      targetOffset = remaining
+      break
+    }
+    remaining -= textLength
+  }
+
+  if (!targetNode) {
+    targetNode = el.lastChild
+    targetOffset = targetNode?.textContent?.length || 0
+  }
+
+  if (!targetNode) return
+
+  const range = document.createRange()
+  range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent?.length || 0))
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function focusEditorAt(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement, position: number) {
+  editor.focus()
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+    const safePos = Math.max(0, Math.min(position, editor.value.length))
+    editor.setSelectionRange(safePos, safePos)
+    return
+  }
+  setContentEditableCaret(editor, position)
+}
+
+function isEditorFocused(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement): boolean {
+  if (document.activeElement === editor) return true
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) return false
+
+  const selection = window.getSelection()
+  const anchor = selection?.anchorNode
+  return !!anchor && editor.contains(anchor)
+}
+
+function waitForFocusTick(): Promise<void> {
+  return new Promise(resolve => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve()
+    }
+
+    requestAnimationFrame(finish)
+    setTimeout(finish, 50)
+  })
+}
+
+async function focusDescriptionEditorWithRetry(
+  editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement,
+  position: number,
+  getLatestEditor: () => HTMLElement | HTMLInputElement | HTMLTextAreaElement | null,
+): Promise<boolean> {
+  let currentEditor = editor
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (!currentEditor.isConnected) {
+      const latest = getLatestEditor()
+      if (!latest) return false
+      currentEditor = latest
+    }
+
+    focusEditorAt(currentEditor, position)
+    if (isEditorFocused(currentEditor)) return true
+
+    await waitForFocusTick()
+
+    const latest = getLatestEditor()
+    if (latest) {
+      currentEditor = latest
+    }
+
+    if (isEditorFocused(currentEditor)) return true
+  }
+
+  return false
+}
+
+function getDescriptionEditor(root: ParentNode): HTMLElement | HTMLInputElement | HTMLTextAreaElement | null {
+  const selectors = [
+    'textarea[aria-label="Description"]',
+    'textarea[aria-label*="description" i]',
+    'textarea[name*="description" i]',
+    'div[contenteditable="true"][aria-label="Description"]',
+    'div[contenteditable="true"][aria-label*="description" i]',
+    'div[role="textbox"][contenteditable="true"][aria-label*="description" i]',
+    'div[role="textbox"][aria-label*="description" i]',
+    'div[contenteditable="true"][data-placeholder*="description" i]',
+  ]
+
+  for (const selector of selectors) {
+    const found = root.querySelector(selector)
+    if (found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement || found instanceof HTMLElement) {
+      return found
+    }
+  }
+
+  return null
+}
+
+function clickAddDescription(root: ParentNode): boolean {
+  const candidates = root.querySelectorAll('button, div[role="button"], span[role="button"]')
+  for (const candidate of candidates) {
+    const label = (candidate.getAttribute('aria-label') || '').toLowerCase()
+    const text = (candidate.textContent || '').trim().toLowerCase()
+    if (label.includes('description') || text === 'add description') {
+      ;(candidate as HTMLElement).click()
+      return true
+    }
+  }
+  return false
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function resolveDescriptionEditor(root: ParentNode): Promise<HTMLElement | HTMLInputElement | HTMLTextAreaElement | null> {
+  const existing = getDescriptionEditor(root)
+  if (existing) return existing
+
+  const opened = clickAddDescription(root)
+  if (!opened) return null
+
+  await wait(120)
+  const afterOpen = getDescriptionEditor(root)
+  if (afterOpen) return afterOpen
+
+  await wait(220)
+  return getDescriptionEditor(root)
 }
 
 // Status priority map for sorting
@@ -235,8 +414,12 @@ export default function ContentApp({
       // Only strip if it matches the extension's format [KEY-123]
       val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
 
-      setQuery(val)
-      setForceApi(false)
+      setQuery((prev) => {
+        if (prev !== val) {
+          setForceApi(false)
+        }
+        return val
+      })
     }
 
     const handleFocus = () => setIsFocused(true)
@@ -260,13 +443,11 @@ export default function ContentApp({
     }
 
     titleInput.addEventListener('input', handleInput)
-    titleInput.addEventListener('focus', handleInput)
     titleInput.addEventListener('focus', handleFocus)
     titleInput.addEventListener('blur', handleBlur)
 
     return () => {
       titleInput.removeEventListener('input', handleInput)
-      titleInput.removeEventListener('focus', handleInput)
       titleInput.removeEventListener('focus', handleFocus)
       titleInput.removeEventListener('blur', handleBlur)
     }
@@ -308,51 +489,51 @@ export default function ContentApp({
     }
   }, [debouncedQuery, results.length, loading, source, open, isFocused])
 
-  const handleSelect = (issue: JiraIssue) => {
+  const handleSelect = async (issue: JiraIssue) => {
     setQuery('')
     setForceApi(false)
     setOpen(false)
 
     // Update Google Calendar Title
-    const input = titleInput || document.querySelector('input[aria-label="Add title"]') as HTMLInputElement
+    const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
+    const currentTitle = (input?.value || titleEl?.textContent || '').trim()
+    const movedTitle = currentTitle.replace(/^\[?[A-Z]+-\d+\]?\s*/, '').trim()
+    const newTitle = `[${issue.key}] ${issue.fields.summary}`
+
     if (input) {
       // Focus first to simulate user interaction
       input.focus()
 
-      // Check if there is already a key at the start
-      const currentVal = input.value
-      const keyMatch = currentVal.match(/^\[?([A-Z]+-\d+)\]?\s*/)
+      setTextControlValue(input, newTitle)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
 
-      let newValue = ''
-      if (keyMatch) {
-        // Replace existing key
-        newValue = currentVal.replace(/^\[?[A-Z]+-\d+\]?\s*/, `[${issue.key}] `)
-      } else {
-        // Prepend new key
-        const trimmedVal = currentVal.trim()
-        if (trimmedVal) {
-          newValue = `[${issue.key}] ${trimmedVal}`
-        } else {
-          newValue = `[${issue.key}] ${issue.fields.summary}`
-        }
-      }
+    if (!movedTitle) return
 
-      // Use native setter to ensure React/frameworks detect the change
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(input, newValue);
-      } else {
-        setInputValue(input, newValue)
-      }
+    const root = container || document
+    const descriptionEditor = await resolveDescriptionEditor(root)
+    if (!descriptionEditor) {
+      console.warn('[Jira Sync] Failed to find description editor to move title')
+      return
+    }
 
-      // Dispatch events to trigger listeners
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+    const existingDescription = getEditorValue(descriptionEditor).trim()
+    const nextDescription = existingDescription
+      ? `${movedTitle}\n\n${existingDescription}`
+      : movedTitle
 
-      // Blur to commit the change (simulating user leaving the field)
-      setTimeout(() => {
-        input.blur()
-      }, 0)
+    setEditorValue(descriptionEditor, nextDescription)
+
+    const updatedEditor = getDescriptionEditor(root)
+    const focusTarget = updatedEditor && updatedEditor.isConnected ? updatedEditor : descriptionEditor
+    const focused = await focusDescriptionEditorWithRetry(
+      focusTarget,
+      movedTitle.length,
+      () => getDescriptionEditor(root),
+    )
+    if (!focused) {
+      console.warn('[Jira Sync] Failed to lock focus on description editor')
     }
   }
 
@@ -420,14 +601,18 @@ export default function ContentApp({
           <div className="max-h-60 overflow-y-auto">
             {loading && <div className="p-2 text-xs text-muted-foreground text-center">Searching...</div>}
 
-            {!loading && results.length === 0 && (
-              <div className="p-2 text-xs text-muted-foreground text-center">No issues found</div>
+            {!loading && results.length === 0 && source === 'local' && (
+              <div className="p-2 text-xs text-muted-foreground text-center">No local issues found</div>
+            )}
+
+            {!loading && results.length === 0 && source === 'api' && (
+              <div className="p-2 text-xs text-muted-foreground text-center">No issues found in Jira</div>
             )}
 
             {results.map(issue => (
               <button
                 key={issue.id}
-                onClick={() => handleSelect(issue)}
+                onClick={() => void handleSelect(issue)}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors group"
               >
                 <div className="flex items-center justify-between">
