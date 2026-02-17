@@ -65,9 +65,20 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
     try {
       // Check TTL
       const lastSync = stored.last_sync ? new Date(stored.last_sync).getTime() : 0
-      if (Date.now() - lastSync > TTL) {
+      const staleMs = Date.now() - lastSync
+      if (staleMs > TTL) {
+        console.info(
+          `[Jira Sync] Task cache invalidated (stale by ${Math.max(0, Math.floor(staleMs / 1000))}s). Triggering automatic refresh...`,
+        )
+
         // Trigger background sync (fire and forget)
-        sendToBackground('SYNC_DATA', {})
+        sendToBackground<SyncDataResponse>('SYNC_DATA', {})
+          .then((result: SyncDataResponse) => {
+            console.info(`[Jira Sync] Automatic task refresh completed. Synced ${result.count} tasks.`)
+          })
+          .catch((e) => {
+            console.error('[Jira Sync] Automatic task refresh failed', e)
+          })
       }
 
       if (stored.issues && stored.issues.length > 0) {

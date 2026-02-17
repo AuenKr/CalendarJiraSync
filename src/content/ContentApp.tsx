@@ -149,37 +149,119 @@ async function focusDescriptionEditorWithRetry(
   return false
 }
 
-function getDescriptionEditor(root: ParentNode): HTMLElement | HTMLInputElement | HTMLTextAreaElement | null {
-  const selectors = [
-    'textarea[aria-label="Description"]',
-    'textarea[aria-label*="description" i]',
-    'textarea[name*="description" i]',
-    'div[contenteditable="true"][aria-label="Description"]',
-    'div[contenteditable="true"][aria-label*="description" i]',
-    'div[role="textbox"][contenteditable="true"][aria-label*="description" i]',
-    'div[role="textbox"][aria-label*="description" i]',
-    'div[contenteditable="true"][data-placeholder*="description" i]',
-  ]
+async function lockDescriptionFocus(
+  editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement,
+  position: number,
+  getLatestEditor: () => HTMLElement | HTMLInputElement | HTMLTextAreaElement | null,
+): Promise<boolean> {
+  const focused = await focusDescriptionEditorWithRetry(editor, position, getLatestEditor)
+  if (!focused) return false
 
-  for (const selector of selectors) {
-    const found = root.querySelector(selector)
-    if (found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement || found instanceof HTMLElement) {
-      return found
+  // Google Calendar can steal focus back to title after async internal updates.
+  // Re-assert focus for a short period so caret stays in description.
+  const delays = [60, 140, 260, 420, 700]
+  for (const delay of delays) {
+    await wait(delay)
+    const latest = getLatestEditor()
+    if (!latest || !latest.isConnected) continue
+    if (isEditorFocused(latest)) continue
+    focusEditorAt(latest, position)
+  }
+
+  const latest = getLatestEditor()
+  return !!latest && isEditorFocused(latest)
+}
+
+type DescriptionEditor = HTMLElement | HTMLInputElement | HTMLTextAreaElement
+
+const DESCRIPTION_EDITOR_SELECTORS = [
+  'textarea[aria-label="Description"]',
+  'textarea[aria-label*="description" i]',
+  'textarea[aria-label*="description or attachments" i]',
+  'textarea[name*="description" i]',
+  'div[contenteditable="true"][aria-label="Description"]',
+  'div[contenteditable="plaintext-only"][aria-label="Description"]',
+  'div[contenteditable="true"][aria-label*="description" i]',
+  'div[contenteditable="plaintext-only"][aria-label*="description" i]',
+  'div[role="textbox"][contenteditable="true"][aria-label*="description" i]',
+  'div[role="textbox"][aria-label*="description" i]',
+  'div[role="textbox"][aria-label*="description or attachments" i]',
+  'div[contenteditable="true"][data-placeholder*="description" i]',
+  'div[contenteditable="plaintext-only"][data-placeholder*="description" i]',
+]
+
+function isElementVisible(el: Element): boolean {
+  const style = window.getComputedStyle(el as HTMLElement)
+  return style.display !== 'none' && style.visibility !== 'hidden'
+}
+
+function isEditableElement(el: HTMLElement): boolean {
+  return el.isContentEditable || el.getAttribute('role') === 'textbox'
+}
+
+function isEditorUsable(editor: DescriptionEditor): boolean {
+  if (!editor.isConnected || !isElementVisible(editor) || editor.getClientRects().length === 0) return false
+  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+    return !editor.disabled && !editor.readOnly
+  }
+  return isEditableElement(editor)
+}
+
+function toUsableEditor(candidate: Element | null): DescriptionEditor | null {
+  if (!candidate) return null
+
+  if (candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement) {
+    return isEditorUsable(candidate) ? candidate : null
+  }
+
+  if (!(candidate instanceof HTMLElement)) return null
+
+  if (isEditableElement(candidate) && isEditorUsable(candidate)) {
+    return candidate
+  }
+
+  const innerEditable = candidate.querySelector('[contenteditable="true"], [contenteditable="plaintext-only"]')
+  if (innerEditable instanceof HTMLElement && isEditorUsable(innerEditable)) {
+    return innerEditable
+  }
+
+  return null
+}
+
+function getDescriptionEditor(roots: ParentNode[]): DescriptionEditor | null {
+  for (const root of roots) {
+    for (const selector of DESCRIPTION_EDITOR_SELECTORS) {
+      const found = root.querySelector(selector)
+      const editor = toUsableEditor(found)
+      if (editor) return editor
     }
   }
 
   return null
 }
 
-function clickAddDescription(root: ParentNode): boolean {
+function shouldClickAddDescription(candidate: Element): boolean {
+  const label = (candidate.getAttribute('aria-label') || '').toLowerCase()
+  const text = (candidate.textContent || '').trim().toLowerCase()
+  const content = `${label} ${text}`
+  return content.includes('add description') || content.includes('description or attachments')
+}
+
+function clickAddDescriptionInRoot(root: ParentNode): boolean {
   const candidates = root.querySelectorAll('button, div[role="button"], span[role="button"]')
   for (const candidate of candidates) {
-    const label = (candidate.getAttribute('aria-label') || '').toLowerCase()
-    const text = (candidate.textContent || '').trim().toLowerCase()
-    if (label.includes('description') || text === 'add description') {
-      ;(candidate as HTMLElement).click()
+    if (shouldClickAddDescription(candidate) && candidate instanceof HTMLElement) {
+      candidate.click()
       return true
     }
+  }
+
+  return false
+}
+
+function clickAddDescription(roots: ParentNode[]): boolean {
+  for (const root of roots) {
+    if (clickAddDescriptionInRoot(root)) return true
   }
   return false
 }
@@ -188,19 +270,31 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function resolveDescriptionEditor(root: ParentNode): Promise<HTMLElement | HTMLInputElement | HTMLTextAreaElement | null> {
-  const existing = getDescriptionEditor(root)
-  if (existing) return existing
+async function resolveDescriptionEditor(roots: ParentNode[]): Promise<{ editor: DescriptionEditor | null, openControlFound: boolean }> {
+  const existing = getDescriptionEditor(roots)
+  if (existing) {
+    return { editor: existing, openControlFound: false }
+  }
 
-  const opened = clickAddDescription(root)
-  if (!opened) return null
+  const openControlFound = clickAddDescription(roots)
+  if (!openControlFound) {
+    return { editor: null, openControlFound: false }
+  }
 
-  await wait(120)
-  const afterOpen = getDescriptionEditor(root)
-  if (afterOpen) return afterOpen
+  const waits = [120, 200, 280, 350]
+  for (const delay of waits) {
+    await wait(delay)
+    const editor = getDescriptionEditor(roots)
+    if (editor) {
+      return { editor, openControlFound: true }
+    }
+  }
 
-  await wait(220)
-  return getDescriptionEditor(root)
+  return { editor: null, openControlFound: true }
+}
+
+function normalizeForDuplicateCheck(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
 // Status priority map for sorting
@@ -511,26 +605,42 @@ export default function ContentApp({
 
     if (!movedTitle) return
 
-    const root = container || document
-    const descriptionEditor = await resolveDescriptionEditor(root)
+    const roots: ParentNode[] = []
+    if (container) roots.push(container)
+    roots.push(document)
+
+    const { editor: descriptionEditor, openControlFound } = await resolveDescriptionEditor(roots)
     if (!descriptionEditor) {
+      if (!openControlFound) {
+        console.warn('[Jira Sync] Failed to find description open control')
+      }
       console.warn('[Jira Sync] Failed to find description editor to move title')
       return
     }
 
     const existingDescription = getEditorValue(descriptionEditor).trim()
-    const nextDescription = existingDescription
-      ? `${movedTitle}\n\n${existingDescription}`
-      : movedTitle
+    const normalizedMovedTitle = normalizeForDuplicateCheck(movedTitle)
+    const normalizedExisting = normalizeForDuplicateCheck(existingDescription)
+    const shouldInsertMovedTitle = normalizedMovedTitle.length > 0 && !normalizedExisting.includes(normalizedMovedTitle)
 
-    setEditorValue(descriptionEditor, nextDescription)
+    const nextDescription = shouldInsertMovedTitle
+      ? (existingDescription ? `${movedTitle}\n\n${existingDescription}` : movedTitle)
+      : existingDescription
 
-    const updatedEditor = getDescriptionEditor(root)
+    if (shouldInsertMovedTitle) {
+      setEditorValue(descriptionEditor, nextDescription)
+    }
+
+    const caretPosition = shouldInsertMovedTitle
+      ? (existingDescription ? movedTitle.length + 2 : movedTitle.length)
+      : nextDescription.length
+
+    const updatedEditor = getDescriptionEditor(roots)
     const focusTarget = updatedEditor && updatedEditor.isConnected ? updatedEditor : descriptionEditor
-    const focused = await focusDescriptionEditorWithRetry(
+    const focused = await lockDescriptionFocus(
       focusTarget,
-      movedTitle.length,
-      () => getDescriptionEditor(root),
+      caretPosition,
+      () => getDescriptionEditor(roots),
     )
     if (!focused) {
       console.warn('[Jira Sync] Failed to lock focus on description editor')
@@ -596,6 +706,7 @@ export default function ContentApp({
           side="bottom"
           sideOffset={10}
           onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="max-h-60 overflow-y-auto">
