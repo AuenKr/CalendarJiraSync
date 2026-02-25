@@ -44,6 +44,7 @@ function applyThemeToElement(element: Element) {
 }
 
 function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: HTMLDivElement } {
+  host.style.background = 'transparent'
   const shadow = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
@@ -52,6 +53,7 @@ function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: H
 
   const root = document.createElement('div')
   root.className = 'calendar-jira-sync-root'
+  root.style.background = 'transparent'
   applyThemeToElement(root)
   shadow.appendChild(root)
 
@@ -91,19 +93,25 @@ function injectApp(modal: Element) {
     return
   }
 
+  const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
+
+  const isVisibleInput = (node: HTMLInputElement): boolean => {
+    const style = window.getComputedStyle(node)
+    return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0
+  }
+
   const resolveVisibleTitleInput = (root: ParentNode): HTMLInputElement | null => {
     const selectors = [
       'input[aria-label="Add title"]',
       'input[aria-label="Title"]',
+      'input[aria-label*="title" i]',
       '#xTiIn',
     ]
     for (const selector of selectors) {
       const nodes = root.querySelectorAll(selector)
       for (const node of nodes) {
         if (!(node instanceof HTMLInputElement)) continue
-        const style = window.getComputedStyle(node)
-        const visible = style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0
-        if (visible) return node
+        if (isVisibleInput(node)) return node
       }
     }
     return null
@@ -111,8 +119,6 @@ function injectApp(modal: Element) {
 
   const resolveVisibleTitleElement = (root: ParentNode): HTMLElement | undefined => {
     const selectors = ['[role="heading"]', '.JAPzS', '.gUD7Lf']
-    const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
-    const matches: HTMLElement[] = []
     for (const selector of selectors) {
       const nodes = root.querySelectorAll(selector)
       for (const node of nodes) {
@@ -122,14 +128,21 @@ function injectApp(modal: Element) {
         if (!visible) continue
         const text = (node.textContent || '').trim()
         if (!text) continue
-        matches.push(node)
         if (keyPattern.test(text)) {
           return node
         }
       }
     }
-    return matches[0]
+    return undefined
   }
+
+  const isEventEditView = document.body.getAttribute('data-viewfamily') === 'EVENT_EDIT'
+  const lookupRoot = isEventEditView
+    ? (modal.querySelector('[data-viewkey="EVENTEDIT"]') ||
+      modal.querySelector('.XyKLOd') ||
+      modal.querySelector('.A0VJ5') ||
+      modal)
+    : modal
 
   const host = document.createElement('div')
   host.id = MOUNT_POINT_ID
@@ -140,16 +153,14 @@ function injectApp(modal: Element) {
 
   // Try to find the title input to inject after it
   // Google Calendar classes are obfuscated, so we look for structure or aria-labels
-  let titleInput = resolveVisibleTitleInput(modal)
+  let titleInput = resolveVisibleTitleInput(lookupRoot)
 
   // Check if modal itself is the input (e.g. if observer passed the input directly)
   if (!titleInput && modal instanceof HTMLInputElement) {
     if (modal.id === 'xTiIn' || 
         modal.getAttribute('aria-label') === 'Add title' || 
         modal.getAttribute('aria-label') === 'Title') {
-      const style = window.getComputedStyle(modal)
-      const visible = style.display !== 'none' && style.visibility !== 'hidden' && modal.getClientRects().length > 0
-      if (visible) {
+      if (isVisibleInput(modal)) {
         titleInput = modal
       }
     }
@@ -157,7 +168,7 @@ function injectApp(modal: Element) {
 
   let titleElement: HTMLElement | undefined
   if (!titleInput) {
-     titleElement = resolveVisibleTitleElement(modal)
+     titleElement = resolveVisibleTitleElement(lookupRoot)
   }
 
   if (!titleInput && !titleElement) {
@@ -209,15 +220,30 @@ function injectApp(modal: Element) {
       titleInput.parentElement.insertAdjacentElement('afterend', host)
       injected = true
     }
-  } else if (titleElement && titleElement.parentElement) {
-      // Inject after title element for Bubble view
-      // console.log('[Calendar Jira Sync] Found title element', titleElement)
-      host.style.position = 'absolute'
-      host.style.top = '16px'
-      host.style.right = '60px'
+  } else if (titleElement && modal instanceof HTMLElement) {
+      // Use a stable in-flow anchor in bubble layout to avoid geometry drift.
+      const whenContent = modal.querySelector('#xDetDlgWhen .JEx5le, #xDetDlgWhen .bgOWSb, #xDetDlgWhen')
+      const bubbleSection = modal.querySelector('.hMdQi, [jsname="sV9x3c"]')
+      host.style.position = 'relative'
       host.style.zIndex = '10000'
-      modal.appendChild(host)
-      injected = true
+      host.style.marginTop = '6px'
+      host.style.marginBottom = '2px'
+
+      if (whenContent instanceof HTMLElement) {
+        whenContent.appendChild(host)
+        injected = true
+      } else if (bubbleSection instanceof HTMLElement) {
+        const firstRow = bubbleSection.firstElementChild
+        if (firstRow instanceof HTMLElement) {
+          firstRow.insertAdjacentElement('afterend', host)
+        } else {
+          bubbleSection.appendChild(host)
+        }
+        injected = true
+      } else {
+        titleElement.insertAdjacentElement('afterend', host)
+        injected = true
+      }
   }
 
   if (!injected) {
@@ -253,50 +279,45 @@ function injectApp(modal: Element) {
   }
 }
 
+function resolveInjectionTarget(node: Element): Element | null {
+  if (node.matches('[role="dialog"], .yDmH0d, .p9lUpf')) return node
+
+  if (node.id === 'xTiIn' && node.parentElement) {
+    return node.parentElement
+  }
+
+  const dialog = node.closest('[role="dialog"]')
+  if (dialog) return dialog
+
+  return node.querySelector('[role="dialog"], .yDmH0d, .p9lUpf') ||
+    node.querySelector('#xTiIn')?.parentElement ||
+    null
+}
+
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node instanceof Element) {
-        // Check for dialog role
-        if (node.getAttribute('role') === 'dialog') {
-          // console.log('[Calendar Jira Sync] Detected new dialog', node)
-          injectApp(node)
-        } else {
-          const dialog = node.querySelector('[role="dialog"]')
-          if (dialog) {
-            // console.log('[Calendar Jira Sync] Detected dialog inside added node', dialog)
-            injectApp(dialog)
-            return // Found a dialog, stop checking this node
-          }
-          
-          // Also check for the "event edit" container which might not be a dialog in some views
-          // Class 'yDmH0d' is often used for the event bubble
-          if (node.classList.contains('yDmH0d')) {
-             injectApp(node)
-             return
-          }
-          const bubble = node.querySelector('.yDmH0d')
-          if (bubble) {
-             injectApp(bubble)
-             return
-          }
-          
-          // Check for full page edit container
-          if (node.id === 'xTiIn') {
-             // If we found the input directly, pass its parent
-             if (node.parentElement) injectApp(node.parentElement)
-             return
-          }
-          if (node.classList.contains('p9lUpf')) {
-             injectApp(node)
-             return
-          }
-          const fullEdit = node.querySelector('#xTiIn') || node.querySelector('.p9lUpf')
-          if (fullEdit) {
-             injectApp(fullEdit)
-             return
-          }
+        const target = resolveInjectionTarget(node)
+        if (target) {
+          injectApp(target)
         }
+      }
+    }
+
+    for (const node of mutation.removedNodes) {
+      if (!(node instanceof Element)) continue
+      const removedMount = node.id === MOUNT_POINT_ID ? node : node.querySelector(`#${MOUNT_POINT_ID}`)
+      if (!removedMount) continue
+
+      const target = mutation.target instanceof Element
+        ? resolveInjectionTarget(mutation.target)
+        : null
+      if (target) {
+        console.log('[Jira Sync][Content] Detected removed mount, reinjecting', {
+          role: target.getAttribute('role') || 'none',
+        })
+        injectApp(target)
       }
     }
   }
@@ -305,6 +326,24 @@ const observer = new MutationObserver((mutations) => {
 // Start observing
 // console.log('[Calendar Jira Sync] Starting observer')
 observer.observe(document.body, { childList: true, subtree: true })
+
+function ensureMountOnActiveContainers() {
+  const candidates = [
+    ...Array.from(document.querySelectorAll('[role="dialog"]')),
+    ...Array.from(document.querySelectorAll('.yDmH0d')),
+  ]
+
+  for (const candidate of candidates) {
+    if (!(candidate instanceof Element)) continue
+    const style = window.getComputedStyle(candidate as HTMLElement)
+    if (style.display === 'none' || style.visibility === 'hidden') continue
+    if (candidate.querySelector(`#${MOUNT_POINT_ID}`)) continue
+    injectApp(candidate)
+  }
+}
+
+const mountHealthInterval = window.setInterval(ensureMountOnActiveContainers, 1500)
+window.addEventListener('beforeunload', () => window.clearInterval(mountHealthInterval), { once: true })
 
 // Check if dialog is already open (e.g. on reload)
 const existingDialog = document.querySelector('[role="dialog"]')

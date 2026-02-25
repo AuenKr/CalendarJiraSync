@@ -1,7 +1,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Check, ChevronDown, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { searchIssues, getIssue, getTransitions, transitionIssue, type JiraIssue, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
 
@@ -291,28 +291,50 @@ function getStatusPriority(statusName?: string): number {
   return STATUS_PRIORITY[statusName] || 99
 }
 
-function findTitleElement(root: ParentNode): HTMLElement | undefined {
+function getStatusToneClass(statusName?: string): string {
+  if (statusName === 'Done') {
+    return 'text-emerald-300'
+  }
+  if (statusName === 'In Progress') {
+    return 'text-sky-300'
+  }
+  if (statusName === 'To Do') {
+    return 'text-amber-300'
+  }
+  return 'text-muted-foreground'
+}
+
+const LINKED_ISSUE_PATTERN = /\[?([A-Z][A-Z0-9]+-\d+)\]?/
+
+function normalizeLinkedText(value: string): string {
+  return value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim()
+}
+
+function findTitleElement(root: ParentNode, requireKey = false): HTMLElement | undefined {
   const selectors = ['[role="heading"]', '.JAPzS', '.gUD7Lf']
-  const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
-  const matches: HTMLElement[] = []
   for (const selector of selectors) {
     const candidates = root.querySelectorAll(selector)
     for (const candidate of candidates) {
-      if (candidate instanceof HTMLElement && isElementVisible(candidate) && (candidate.textContent || '').trim().length > 0) {
-        matches.push(candidate)
-        if (keyPattern.test((candidate.textContent || '').trim())) {
-          return candidate
-        }
+      if (!(candidate instanceof HTMLElement)) continue
+      if (!isElementVisible(candidate)) continue
+
+      const text = normalizeLinkedText(candidate.textContent || '')
+      if (!text) continue
+      const hasKey = !!extractLinkedIssueKey(text)
+
+      if (!requireKey || hasKey) {
+        return candidate
       }
     }
   }
-  return matches[0]
+  return undefined
 }
 
 function findVisibleTitleInput(root: ParentNode): HTMLInputElement | null {
   const selectors = [
     'input[aria-label="Add title"]',
     'input[aria-label="Title"]',
+    '#xTiIn',
     'input[type="text"][aria-label*="title" i]',
   ]
 
@@ -330,12 +352,37 @@ function findVisibleTitleInput(root: ParentNode): HTMLInputElement | null {
 }
 
 function extractLinkedIssueKey(value: string): string | null {
-  const match = value.trim().match(/\[?([A-Z][A-Z0-9]+-\d+)\]?/)
+  const match = normalizeLinkedText(value).match(LINKED_ISSUE_PATTERN)
   return match ? match[1] : null
 }
 
 function stripLinkedIssuePrefix(value: string): string {
-  return value.replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?\s*/, '')
+  return normalizeLinkedText(value).replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?\s*/, '')
+}
+
+type KeySource = 'title-input' | 'heading' | 'data-text' | 'none'
+
+interface LinkedKeyResolution {
+  key: string | null
+  source: KeySource
+  hasAnyText: boolean
+}
+
+function findTitleDataText(root: ParentNode): string {
+  const nodes = root.querySelectorAll('[data-text]')
+  let fallback = ''
+
+  for (const node of nodes) {
+    if (!(node instanceof HTMLElement)) continue
+    if (!isElementVisible(node)) continue
+
+    const dataText = normalizeLinkedText(node.getAttribute('data-text') || '')
+    if (!dataText) continue
+    if (extractLinkedIssueKey(dataText)) return dataText
+    if (!fallback) fallback = dataText
+  }
+
+  return fallback
 }
 
 export default function ContentApp({
@@ -359,6 +406,49 @@ export default function ContentApp({
   const queryClient = useQueryClient()
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
+  const emptyResolutionCountRef = useRef(0)
+
+  const resolveLinkedKey = useCallback((): LinkedKeyResolution => {
+    const root = container || document
+    const hasUsableTitleInput = !!titleInput && titleInput.isConnected && isElementVisible(titleInput)
+    const inputText = hasUsableTitleInput && titleInput ? normalizeLinkedText(titleInput.value) : ''
+    const inputKey = extractLinkedIssueKey(inputText)
+    if (inputKey) {
+      return { key: inputKey, source: 'title-input', hasAnyText: true }
+    }
+
+    const resolvedTitleEl = titleEl && titleEl.isConnected && isElementVisible(titleEl)
+      ? titleEl
+      : findTitleElement(root, true)
+    const headingText = normalizeLinkedText(resolvedTitleEl?.textContent || '')
+    const headingKey = extractLinkedIssueKey(headingText)
+    if (headingKey) {
+      return { key: headingKey, source: 'heading', hasAnyText: true }
+    }
+
+    const dataText = findTitleDataText(root)
+    const dataKey = extractLinkedIssueKey(dataText)
+    if (dataKey) {
+      return { key: dataKey, source: 'data-text', hasAnyText: true }
+    }
+
+    return {
+      key: null,
+      source: 'none',
+      hasAnyText: !!(inputText || headingText || dataText),
+    }
+  }, [container, titleEl, titleInput])
+
+  useEffect(() => {
+    console.log(`${logPrefix} Lifecycle: mounted`, {
+      hasInitialTitleInput: !!initialInput,
+      hasInitialTitleElement: !!titleElement,
+      hasContainer: !!container,
+    })
+    return () => {
+      console.log(`${logPrefix} Lifecycle: unmounted`)
+    }
+  }, [container, initialInput, titleElement])
 
   // Update titleEl if prop changes
   useEffect(() => {
@@ -368,7 +458,7 @@ export default function ContentApp({
   // Poll for title element if we are in "Bubble view" (i.e. not editing with input)
   useEffect(() => {
     if (titleInput) return // We are in edit mode, different logic
-    
+
     const findTitle = () => {
       if (titleEl && titleEl.isConnected) {
         const existingText = (titleEl.textContent || '').trim()
@@ -385,7 +475,7 @@ export default function ContentApp({
         setTitleEl(newEl)
       }
     }
-    
+
     findTitle()
     const interval = setInterval(findTitle, 500)
     return () => clearInterval(interval)
@@ -396,15 +486,19 @@ export default function ContentApp({
     // If we have a title element (Bubble mode), we don't need to poll for input
     if (titleElement) return
 
+    const isLikelyTitleInput = (el: Element | null): el is HTMLInputElement => {
+      if (!(el instanceof HTMLInputElement)) return false
+      const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase()
+      return el.id === 'xTiIn' || ariaLabel.includes('title')
+    }
+
     // Otherwise, try to find the active title input
     const findInput = () => {
       const root = container || document
 
       // Check active element first - if user is typing, this is the one we want!
-      if (document.activeElement &&
-        (document.activeElement.getAttribute('aria-label') === 'Add title' ||
-          document.activeElement.getAttribute('aria-label') === 'Title')) {
-        const active = document.activeElement as HTMLInputElement
+      if (isLikelyTitleInput(document.activeElement)) {
+        const active = document.activeElement
         if (active !== titleInput) {
           console.log(`${logPrefix} Step: detected active title input`)
           setTitleInput(active)
@@ -427,10 +521,7 @@ export default function ContentApp({
     // Global focus listener to catch inputs even if they are not found by selectors initially
     const handleGlobalFocus = (e: FocusEvent) => {
       const target = e.target as HTMLElement
-      if (target instanceof HTMLInputElement &&
-        (target.getAttribute('aria-label') === 'Add title' ||
-          target.getAttribute('aria-label') === 'Title' ||
-          target.getAttribute('aria-label') === 'Add title and time')) { // Added 'Add title and time' for quick add bubble
+      if (isLikelyTitleInput(target)) {
         if (target !== titleInput) {
           console.log(`${logPrefix} Step: title input focus listener detected new input`)
           setTitleInput(target)
@@ -446,22 +537,37 @@ export default function ContentApp({
     }
   }, [titleInput, titleElement, container])
 
-  // Extract linked key from input or element
+  // Extract linked key from input, heading, or title data attributes.
   useEffect(() => {
     const checkKey = () => {
-      let value = ''
-      const hasUsableTitleInput = !!titleInput && titleInput.isConnected && isElementVisible(titleInput)
-      if (hasUsableTitleInput && titleInput) {
-        value = titleInput.value
-      } else if (titleEl) {
-        value = titleEl.textContent || ''
-      }
-
-      const nextKey = extractLinkedIssueKey(value)
+      const resolution = resolveLinkedKey()
       setLinkedKey(prev => {
-        const next = nextKey || null
+        const next = resolution.key
+        if (next) {
+          emptyResolutionCountRef.current = 0
+        } else {
+          emptyResolutionCountRef.current += 1
+        }
+
+        if (!next && prev) {
+          if (resolution.hasAnyText) {
+            // Keep prior key while Calendar is still mutating title nodes.
+            return prev
+          }
+
+          // Guard against transient empty states in dynamic Calendar DOM updates.
+          if (emptyResolutionCountRef.current < 8) {
+            return prev
+          }
+        }
+
         if (prev !== next) {
-          console.log(`${logPrefix} Step: linked key changed`, { previous: prev, next })
+          console.log(`${logPrefix} Step: linked key changed`, {
+            previous: prev,
+            next,
+            source: resolution.source,
+            emptyResolutions: emptyResolutionCountRef.current,
+          })
         }
         return next
       })
@@ -469,6 +575,15 @@ export default function ContentApp({
 
     checkKey()
     const poller = setInterval(checkKey, 500)
+    const observeRoot = container || document.body || document.documentElement
+    const observer = new MutationObserver(() => checkKey())
+    observer.observe(observeRoot, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-text', 'aria-label', 'value'],
+    })
 
     if (titleInput) {
       const handleInput = () => checkKey()
@@ -478,22 +593,27 @@ export default function ContentApp({
 
       return () => {
         clearInterval(poller)
+        observer.disconnect()
         titleInput.removeEventListener('input', handleInput)
         titleInput.removeEventListener('change', handleInput)
         titleInput.removeEventListener('keyup', handleInput)
       }
     } else if (titleEl) {
       // Observe changes to title element text
-      const observer = new MutationObserver(checkKey)
-      observer.observe(titleEl, { childList: true, characterData: true, subtree: true })
+      const titleObserver = new MutationObserver(checkKey)
+      titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true })
       return () => {
         clearInterval(poller)
         observer.disconnect()
+        titleObserver.disconnect()
       }
     }
 
-    return () => clearInterval(poller)
-  }, [titleInput, titleEl])
+    return () => {
+      clearInterval(poller)
+      observer.disconnect()
+    }
+  }, [container, resolveLinkedKey, titleEl, titleInput])
 
   // Fetch linked issue details (status)
   const { data: linkedIssue, refetch: refetchLinkedIssue } = useQuery({
@@ -504,6 +624,40 @@ export default function ContentApp({
   })
 
   const linkedIssueStatus = linkedIssue?.fields.status?.name
+
+  useEffect(() => {
+    console.log(`${logPrefix} State: status visibility snapshot`, {
+      linkedKey,
+      linkedIssueStatus,
+      isBubbleView,
+      hasTitleInput: !!titleInput,
+      hasTitleElement: !!titleEl,
+    })
+  }, [isBubbleView, linkedIssueStatus, linkedKey, titleEl, titleInput])
+
+  useEffect(() => {
+    if (!isBubbleView || !linkedIssueStatus) return
+    const host = (container || document).querySelector('#calendar-jira-sync-root')
+    if (!(host instanceof HTMLElement)) {
+      console.log(`${logPrefix} Debug: host not found in container`)
+      return
+    }
+
+    const rect = host.getBoundingClientRect()
+    const style = window.getComputedStyle(host)
+    console.log(`${logPrefix} Debug: host geometry`, {
+      rect: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+      display: style.display,
+      visibility: style.visibility,
+      opacity: style.opacity,
+      zIndex: style.zIndex,
+    })
+  }, [container, isBubbleView, linkedIssueStatus, logPrefix])
 
   // Fetch transitions for linked issue
   const { data: transitions } = useQuery({
@@ -683,28 +837,39 @@ export default function ContentApp({
   }
 
   return (
-    <div className={cn('jira-sync-overlay font-sans text-left relative', isBubbleView ? 'absolute top-0 right-0 z-50' : '')}>
+    <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
       {linkedKey && (
-        <div className={cn(isBubbleView ? 'relative' : 'absolute right-0 top-7 z-50')}>
+        <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
+          <span className={cn('leading-none text-muted-foreground whitespace-nowrap text-md')}>
+            Jira status:
+          </span>
           <Popover>
             <PopoverTrigger asChild>
               <button
                 className={cn(
-                  "inline-flex !w-auto max-w-[140px] items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border shadow-sm hover:cursor-pointer",
-                  linkedIssueStatus === 'In Progress'
-                    ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:border-blue-900'
-                    : linkedIssueStatus === 'Done'
-                      ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200 dark:bg-green-950/40 dark:text-green-200 dark:border-green-900'
-                      : 'bg-muted text-foreground border-border hover:bg-accent'
+                  'inline-flex w-fit max-w-[160px] items-center rounded-full font-medium transition-colors border hover:cursor-pointer',
+                  isBubbleView ? 'gap-1 px-2.5 py-1 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-[12px]',
+                  'bg-[#f1f3f4] text-[#3c4043] border-[#dadce0] hover:bg-[#e8eaed]',
+                  'dark:bg-[#3c4043] dark:text-[#e8eaed] dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
                 )}
               >
-                {transitionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                <span className="truncate">{linkedIssueStatus || 'Loading...'}</span>
-                <ChevronDown className="h-3 w-3 opacity-50" />
+                {transitionMutation.isPending ? <Loader2 className={cn('animate-spin', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} /> : null}
+                {!transitionMutation.isPending && (
+                  <span className={cn(isBubbleView ? 'h-1.5 w-1.5' : 'h-2 w-2', 'rounded-full bg-current opacity-90', getStatusToneClass(linkedIssueStatus))} />
+                )}
+                <span className={cn('truncate', getStatusToneClass(linkedIssueStatus))}>{linkedIssueStatus || 'Loading...'}</span>
+                <ChevronDown className={cn('opacity-50', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-48 p-1" align="end">
-              <div className="text-xs font-medium text-muted-foreground px-2 py-1.5 mb-1">
+            <PopoverContent
+              className={cn(
+                'w-52 p-1.5 rounded-xl border shadow-[0_6px_18px_rgba(0,0,0,0.18)]',
+                'bg-[#ffffff] text-[#3c4043] border-[#dadce0]',
+                'dark:bg-[#333537] dark:text-[#e8eaed] dark:border-[#5f6368]'
+              )}
+              align="end"
+            >
+              <div className="text-[11px] font-medium px-2.5 py-1.5 mb-1 text-[#5f6368] dark:text-[#bdc1c6]">
                 Change Status
               </div>
               {transitions?.map((t: JiraTransition) => (
@@ -715,14 +880,20 @@ export default function ContentApp({
                     e.stopPropagation()
                     transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })
                   }}
-                  className="w-full text-left px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between"
+                  className={cn(
+                    'w-full text-left px-2.5 py-2 text-[13px] rounded-lg flex items-center justify-between transition-colors',
+                    'hover:bg-[#f1f3f4] text-[#3c4043]',
+                    'dark:hover:bg-[#44474a] dark:text-[#e8eaed]'
+                  )}
                 >
-                  {t.name}
-                  {linkedIssueStatus === (t as unknown as { to?: { name: string } }).to?.name && <Check className="h-3 w-3" />}
+                  <span className="truncate">{t.name}</span>
+                  {linkedIssueStatus === (t as unknown as { to?: { name: string } }).to?.name && (
+                    <Check className="h-3.5 w-3.5 text-[#1a73e8] dark:text-[#8ab4f8]" />
+                  )}
                 </button>
               ))}
               {(!transitions || transitions.length === 0) && (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                <div className="px-2.5 py-2 text-xs text-[#5f6368] dark:text-[#bdc1c6]">
                   No transitions available
                 </div>
               )}
