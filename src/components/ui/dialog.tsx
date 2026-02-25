@@ -17,17 +17,34 @@ function DialogTrigger({
 }
 
 function getPortalContainer() {
-  // Try to find the shadow root host first
-  const shadowHost = document.getElementById("jira-sync-extension-root")
-  if (shadowHost && shadowHost.shadowRoot) {
-    let container = shadowHost.shadowRoot.getElementById("dialog-container")
+  const getContainerFromShadow = (shadowRoot: ShadowRoot): HTMLElement => {
+    let container = shadowRoot.getElementById("dialog-container")
     if (!container) {
       container = document.createElement("div")
       container.id = "dialog-container"
-      shadowHost.shadowRoot.appendChild(container)
+      shadowRoot.appendChild(container)
     }
     return container as HTMLElement
   }
+
+  const activeRoot = document.activeElement?.getRootNode()
+  if (activeRoot instanceof ShadowRoot) {
+    return getContainerFromShadow(activeRoot)
+  }
+
+  const hostIds = [
+    "calendar-jira-sync-dock-root",
+    "calendar-jira-sync-root",
+    "jira-sync-extension-root",
+  ]
+
+  for (const hostId of hostIds) {
+    const shadowHost = document.getElementById(hostId)
+    if (shadowHost?.shadowRoot) {
+      return getContainerFromShadow(shadowHost.shadowRoot)
+    }
+  }
+
   return document.body
 }
 

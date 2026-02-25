@@ -1,6 +1,6 @@
 
 import { Version3Client } from "jira.js"
-import type { Issue, Project, SearchResults } from "jira.js/out/version3/models"
+import type { Issue, Project, SearchResults, Worklog } from "jira.js/out/version3/models"
 import type {
   MessageRequest,
   SearchIssuesPayload,
@@ -10,7 +10,9 @@ import type {
   GetIssuePayload,
   GetTransitionsPayload,
   TransitionIssuePayload,
+  ResetExtensionWorklogsByDatePayload,
 } from "../types/messages"
+import { parseExtensionMetadataFromComment } from "../lib/worklogMetadata"
 
 /* ----------------------------- CONFIG ----------------------------- */
 
@@ -64,6 +66,74 @@ async function getClient() {
 interface EnhancedSearchResults extends SearchResults {
   nextPageToken?: string
   isLast?: boolean
+}
+
+function getDayRangeMs(date: string): { dayStartMs: number, dayEndMs: number } {
+  const dayStart = new Date(`${date}T00:00:00`)
+  const dayEnd = new Date(`${date}T23:59:59.999`)
+  return {
+    dayStartMs: dayStart.getTime(),
+    dayEndMs: dayEnd.getTime(),
+  }
+}
+
+async function findIssueKeysWithWorklogsOnDate(client: Version3Client, date: string): Promise<string[]> {
+  const issueKeys = new Set<string>()
+  const jql = `worklogDate = "${date}" AND worklogAuthor = currentUser() ORDER BY updated DESC`
+
+  let nextPageToken: string | undefined = undefined
+  let isLast = false
+
+  do {
+    const res = await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
+      jql,
+      fields: ['key'],
+      maxResults: 100,
+      nextPageToken,
+    }) as EnhancedSearchResults
+
+    for (const issue of (res.issues || [])) {
+      if (issue.key) issueKeys.add(issue.key)
+    }
+
+    nextPageToken = res.nextPageToken
+    isLast = res.isLast ?? (res.issues ? res.issues.length < 100 : true)
+  } while (!isLast && nextPageToken)
+
+  console.log('[Jira Sync][Background] Reset Step: issue scan completed', { date, issues: issueKeys.size })
+  return Array.from(issueKeys)
+}
+
+async function getIssueWorklogsInRange(
+  client: Version3Client,
+  issueKey: string,
+  dayStartMs: number,
+  dayEndMs: number,
+): Promise<Worklog[]> {
+  const worklogs: Worklog[] = []
+  let startAt = 0
+  const maxResults = 100
+
+  while (true) {
+    const page = await client.issueWorklogs.getIssueWorklog({
+      issueIdOrKey: issueKey,
+      startAt,
+      maxResults,
+      startedAfter: dayStartMs - 1,
+      startedBefore: dayEndMs + 1,
+    })
+
+    const batch = page.worklogs || []
+    worklogs.push(...batch)
+
+    if (batch.length === 0 || startAt + batch.length >= page.total) {
+      break
+    }
+    startAt += batch.length
+  }
+
+  console.log('[Jira Sync][Background] Reset Step: fetched worklogs in range', { issueKey, count: worklogs.length })
+  return worklogs
 }
 
 async function syncData() {
@@ -278,6 +348,59 @@ async function handleMessage(request: MessageRequest) {
       }
 
       return { success: true }
+    }
+
+    case "RESET_EXTENSION_WORKLOGS_BY_DATE": {
+      const client = await getClient()
+      const { date } = payload as ResetExtensionWorklogsByDatePayload
+      console.log('[Jira Sync][Background] Reset Step 1: received reset request', { date })
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new Error('Invalid date format, expected YYYY-MM-DD')
+      }
+
+      const { dayStartMs, dayEndMs } = getDayRangeMs(date)
+      const issueKeys = await findIssueKeysWithWorklogsOnDate(client, date)
+
+      let matchedCount = 0
+      let deletedCount = 0
+
+      for (const issueKey of issueKeys) {
+        console.log('[Jira Sync][Background] Reset Step 2: scanning issue', { issueKey })
+        const issueWorklogs = await getIssueWorklogsInRange(client, issueKey, dayStartMs, dayEndMs)
+
+        for (const worklog of issueWorklogs) {
+          const meta = parseExtensionMetadataFromComment(worklog.comment)
+          if (!meta) continue
+          if (meta.date !== date) continue
+
+          matchedCount++
+          if (!worklog.id) continue
+
+          try {
+            await client.issueWorklogs.deleteWorklog({
+              issueIdOrKey: issueKey,
+              id: worklog.id,
+            })
+            deletedCount++
+            console.log('[Jira Sync][Background] Reset Step 3: deleted extension worklog', { issueKey, worklogId: worklog.id })
+          } catch (e) {
+            console.error(`[Jira Sync] Failed to delete worklog ${worklog.id} on ${issueKey}`, e)
+          }
+        }
+      }
+
+      console.log('[Jira Sync][Background] Reset Step 4: completed', {
+        date,
+        scannedIssues: issueKeys.length,
+        matchedCount,
+        deletedCount,
+      })
+      return {
+        deletedCount,
+        matchedCount,
+        scannedIssues: issueKeys.length,
+      }
     }
 
     case "SYNC_DATA":

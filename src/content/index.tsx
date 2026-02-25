@@ -10,12 +10,125 @@ const MOUNT_POINT_ID = 'calendar-jira-sync-root'
 
 // console.log('[Calendar Jira Sync] Content script loaded')
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'FETCH_CALENDAR_EVENTS') {
+    console.log('[Jira Sync][Content] Received FETCH_CALENDAR_EVENTS')
+    const events = scrapeEvents()
+    console.log('[Jira Sync][Content] Returning scraped events', { count: events.length })
+    sendResponse({ events })
+    return false
+  }
+
+  if (message.type === 'FETCH_EVENT_DESCRIPTION') {
+    const { eventId } = message.payload
+    console.log('[Jira Sync][Content] Received FETCH_EVENT_DESCRIPTION', { eventId })
+    fetchEventDescription(eventId).then(description => {
+      console.log('[Jira Sync][Content] Returning event description', { eventId, hasDescription: !!description })
+      sendResponse({ description })
+    })
+    return true
+  }
+
+  return false
+})
+
+function applyThemeToElement(element: Element) {
+  const bodyBg = window.getComputedStyle(document.body).backgroundColor
+  const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
+
+  if (isDark) {
+    element.classList.add('dark')
+  } else {
+    element.classList.remove('dark')
+  }
+}
+
+function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: HTMLDivElement } {
+  const shadow = host.attachShadow({ mode: 'open' })
+
+  const style = document.createElement('style')
+  style.textContent = styles
+  shadow.appendChild(style)
+
+  const root = document.createElement('div')
+  root.className = 'calendar-jira-sync-root'
+  applyThemeToElement(root)
+  shadow.appendChild(root)
+
+  const themeObserver = new MutationObserver(() => {
+    applyThemeToElement(root)
+    const popoverContainer = shadow.getElementById('popover-container')
+    if (popoverContainer) {
+      applyThemeToElement(popoverContainer)
+    }
+    const dialogContainer = shadow.getElementById('dialog-container')
+    if (dialogContainer) {
+      applyThemeToElement(dialogContainer)
+    }
+  })
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
+
+  const shadowObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue
+        if (node.id === 'popover-container' || node.id === 'dialog-container') {
+          applyThemeToElement(node)
+        }
+      }
+    }
+  })
+  shadowObserver.observe(shadow, { childList: true })
+
+  return { shadow, root }
+}
+
 function injectApp(modal: Element) {
-  // console.log('[Calendar Jira Sync] Attempting to inject into modal', modal)
+  console.log('[Jira Sync][Content] injectApp called', { role: modal.getAttribute('role') || 'none' })
 
   if (modal.querySelector(`#${MOUNT_POINT_ID}`)) {
-    // console.log('[Calendar Jira Sync] Already injected')
+    console.log('[Jira Sync][Content] injectApp skipped: already injected in modal')
     return
+  }
+
+  const resolveVisibleTitleInput = (root: ParentNode): HTMLInputElement | null => {
+    const selectors = [
+      'input[aria-label="Add title"]',
+      'input[aria-label="Title"]',
+      '#xTiIn',
+    ]
+    for (const selector of selectors) {
+      const nodes = root.querySelectorAll(selector)
+      for (const node of nodes) {
+        if (!(node instanceof HTMLInputElement)) continue
+        const style = window.getComputedStyle(node)
+        const visible = style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0
+        if (visible) return node
+      }
+    }
+    return null
+  }
+
+  const resolveVisibleTitleElement = (root: ParentNode): HTMLElement | undefined => {
+    const selectors = ['[role="heading"]', '.JAPzS', '.gUD7Lf']
+    const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
+    const matches: HTMLElement[] = []
+    for (const selector of selectors) {
+      const nodes = root.querySelectorAll(selector)
+      for (const node of nodes) {
+        if (!(node instanceof HTMLElement)) continue
+        const style = window.getComputedStyle(node)
+        const visible = style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0
+        if (!visible) continue
+        const text = (node.textContent || '').trim()
+        if (!text) continue
+        matches.push(node)
+        if (keyPattern.test(text)) {
+          return node
+        }
+      }
+    }
+    return matches[0]
   }
 
   const host = document.createElement('div')
@@ -27,31 +140,28 @@ function injectApp(modal: Element) {
 
   // Try to find the title input to inject after it
   // Google Calendar classes are obfuscated, so we look for structure or aria-labels
-  let titleInput = modal.querySelector('input[aria-label="Add title"]') || 
-                     modal.querySelector('input[aria-label="Title"]') ||
-                     modal.querySelector('input[type="text"]') ||
-                     modal.querySelector('#xTiIn') as Element | null // Full edit page title input ID
+  let titleInput = resolveVisibleTitleInput(modal)
 
   // Check if modal itself is the input (e.g. if observer passed the input directly)
   if (!titleInput && modal instanceof HTMLInputElement) {
     if (modal.id === 'xTiIn' || 
         modal.getAttribute('aria-label') === 'Add title' || 
         modal.getAttribute('aria-label') === 'Title') {
-      titleInput = modal
+      const style = window.getComputedStyle(modal)
+      const visible = style.display !== 'none' && style.visibility !== 'hidden' && modal.getClientRects().length > 0
+      if (visible) {
+        titleInput = modal
+      }
     }
   }
 
   let titleElement: HTMLElement | undefined
   if (!titleInput) {
-     // Try to find title element (for Bubble view)
-     // It's usually a div with role="heading" or specific classes
-     titleElement = (modal.querySelector('[role="heading"]') as HTMLElement) ||
-                    (modal.querySelector('.JAPzS') as HTMLElement) ||
-                    (modal.querySelector('.gUD7Lf') as HTMLElement)
+     titleElement = resolveVisibleTitleElement(modal)
   }
 
   if (!titleInput && !titleElement) {
-    // console.log('[Calendar Jira Sync] No title input or element found. Aborting injection.')
+    console.log('[Jira Sync][Content] injectApp skipped: no title input/element found')
     return
   }
 
@@ -102,29 +212,14 @@ function injectApp(modal: Element) {
   } else if (titleElement && titleElement.parentElement) {
       // Inject after title element for Bubble view
       // console.log('[Calendar Jira Sync] Found title element', titleElement)
-      titleElement.parentElement.insertAdjacentElement('afterend', host)
+      host.style.position = 'absolute'
+      host.style.top = '16px'
+      host.style.right = '60px'
+      host.style.zIndex = '10000'
+      modal.appendChild(host)
       injected = true
   }
 
-
-// Listen for messages from popup
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'FETCH_CALENDAR_EVENTS') {
-    // console.log('[Calendar Jira Sync] Received request to scrape events')
-    const events = scrapeEvents()
-    // console.log('[Calendar Jira Sync] Scraped events:', events)
-    sendResponse({ events })
-  } else if (message.type === 'FETCH_EVENT_DESCRIPTION') {
-    const { eventId } = message.payload
-    fetchEventDescription(eventId).then(description => {
-      sendResponse({ description })
-    })
-    return true // Async response
-  }
-  return true // Keep channel open for async response if needed (though we respond synchronously here)
-})
-
-  
   if (!injected) {
     // console.log('[Calendar Jira Sync] Title input not found or injection failed. Trying generic append.')
     // Fallback: append to the modal content
@@ -138,60 +233,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     content.appendChild(host)
   }
 
-  const shadow = host.attachShadow({ mode: 'open' })
-  const style = document.createElement('style')
-  style.textContent = styles
-  shadow.appendChild(style)
-
-  const root = document.createElement('div')
-  // Add a class to the root for scoping if needed
-  root.className = 'calendar-jira-sync-root'
-  
-  // Detect dark mode from Google Calendar body
-  // GCal sets background color on body. Dark mode is usually #202124 or similar dark colors.
-  // We can also check for specific attributes or just computed style.
-  const updateTheme = () => {
-    const bodyBg = window.getComputedStyle(document.body).backgroundColor
-    // Simple heuristic: if background is dark, enable dark mode
-    // rgb(32, 33, 36) is #202124
-    const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
-    
-    const applyTheme = (el: Element) => {
-      if (isDark) {
-        el.classList.add('dark')
-      } else {
-        el.classList.remove('dark')
-      }
-    }
-
-    applyTheme(root)
-    
-    // Also apply to popover container if it exists
-    const popoverContainer = shadow.getElementById('popover-container')
-    if (popoverContainer) {
-      applyTheme(popoverContainer)
-    }
-  }
-  
-  updateTheme()
-  // Observe body attribute changes for theme switch
-  const themeObserver = new MutationObserver(updateTheme)
-  themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
-
-  // Observe shadow root for new popover container
-  const shadowObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node instanceof Element && node.id === 'popover-container') {
-          // Apply current theme
-          updateTheme()
-        }
-      }
-    }
-  })
-  shadowObserver.observe(shadow, { childList: true })
-
-  shadow.appendChild(root)
+  const { root } = createShadowRootMount(host)
 
   try {
     ReactDOM.createRoot(root).render(
@@ -205,7 +247,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         </QueryClientProvider>
       </StrictMode>
     )
-    // console.log('[Calendar Jira Sync] React app mounted')
+    console.log('[Jira Sync][Content] ContentApp mounted')
   } catch (e) {
     console.error('[Calendar Jira Sync] Failed to mount React app', e)
   }
@@ -284,4 +326,3 @@ if (existingDialog) {
     injectApp(fullEdit)
   }
 }
-

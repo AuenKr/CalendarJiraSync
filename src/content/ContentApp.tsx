@@ -38,20 +38,6 @@ function getEditorValue(editor: HTMLElement | HTMLInputElement | HTMLTextAreaEle
   return editor.textContent || ''
 }
 
-function dispatchEditorChangeEvents(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement) {
-  editor.dispatchEvent(new Event('input', { bubbles: true }))
-  editor.dispatchEvent(new Event('change', { bubbles: true }))
-}
-
-function setEditorValue(editor: HTMLElement | HTMLInputElement | HTMLTextAreaElement, value: string) {
-  if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
-    setTextControlValue(editor, value)
-  } else {
-    editor.textContent = value
-  }
-  dispatchEditorChangeEvents(editor)
-}
-
 function setContentEditableCaret(el: HTMLElement, position: number) {
   const selection = window.getSelection()
   if (!selection) return
@@ -293,10 +279,6 @@ async function resolveDescriptionEditor(roots: ParentNode[]): Promise<{ editor: 
   return { editor: null, openControlFound: true }
 }
 
-function normalizeForDuplicateCheck(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
 // Status priority map for sorting
 const STATUS_PRIORITY: Record<string, number> = {
   'In Progress': 1,
@@ -307,6 +289,53 @@ const STATUS_PRIORITY: Record<string, number> = {
 function getStatusPriority(statusName?: string): number {
   if (!statusName) return 99
   return STATUS_PRIORITY[statusName] || 99
+}
+
+function findTitleElement(root: ParentNode): HTMLElement | undefined {
+  const selectors = ['[role="heading"]', '.JAPzS', '.gUD7Lf']
+  const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
+  const matches: HTMLElement[] = []
+  for (const selector of selectors) {
+    const candidates = root.querySelectorAll(selector)
+    for (const candidate of candidates) {
+      if (candidate instanceof HTMLElement && isElementVisible(candidate) && (candidate.textContent || '').trim().length > 0) {
+        matches.push(candidate)
+        if (keyPattern.test((candidate.textContent || '').trim())) {
+          return candidate
+        }
+      }
+    }
+  }
+  return matches[0]
+}
+
+function findVisibleTitleInput(root: ParentNode): HTMLInputElement | null {
+  const selectors = [
+    'input[aria-label="Add title"]',
+    'input[aria-label="Title"]',
+    'input[type="text"][aria-label*="title" i]',
+  ]
+
+  for (const selector of selectors) {
+    const candidates = root.querySelectorAll(selector)
+    for (const candidate of candidates) {
+      if (!(candidate instanceof HTMLInputElement)) continue
+      if (!isElementVisible(candidate)) continue
+      if (candidate.disabled || candidate.readOnly) continue
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function extractLinkedIssueKey(value: string): string | null {
+  const match = value.trim().match(/\[?([A-Z][A-Z0-9]+-\d+)\]?/)
+  return match ? match[1] : null
+}
+
+function stripLinkedIssuePrefix(value: string): string {
+  return value.replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?\s*/, '')
 }
 
 export default function ContentApp({
@@ -326,7 +355,10 @@ export default function ContentApp({
   const [forceApi, setForceApi] = useState(false)
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
   const [linkedKey, setLinkedKey] = useState<string | null>(null)
+  const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
   const queryClient = useQueryClient()
+  const logPrefix = '[Jira Sync][ContentApp]'
+  const isBubbleView = !!titleEl && !titleInput
 
   // Update titleEl if prop changes
   useEffect(() => {
@@ -338,19 +370,23 @@ export default function ContentApp({
     if (titleInput) return // We are in edit mode, different logic
     
     const findTitle = () => {
-       if (titleEl && titleEl.isConnected) return
-       
-       // Try to find it again
-       const root = container || document
-       const newEl = (root.querySelector('[role="heading"]') as HTMLElement) ||
-                     (root.querySelector('.JAPzS') as HTMLElement) ||
-                     (root.querySelector('.gUD7Lf') as HTMLElement)
-       
-       if (newEl && newEl !== titleEl) {
-         setTitleEl(newEl)
-       }
+      if (titleEl && titleEl.isConnected) {
+        const existingText = (titleEl.textContent || '').trim()
+        if (existingText.length > 0) {
+          return
+        }
+      }
+
+      const root = container || document
+      const newEl = findTitleElement(root)
+      if (!newEl) return
+      if (newEl !== titleEl) {
+        console.log(`${logPrefix} Step: resolved visible title element from DOM`)
+        setTitleEl(newEl)
+      }
     }
     
+    findTitle()
     const interval = setInterval(findTitle, 500)
     return () => clearInterval(interval)
   }, [titleEl, titleInput, container])
@@ -359,9 +395,6 @@ export default function ContentApp({
   useEffect(() => {
     // If we have a title element (Bubble mode), we don't need to poll for input
     if (titleElement) return
-
-    // If we have an input and it's connected, great.
-    if (titleInput && titleInput.isConnected) return
 
     // Otherwise, try to find the active title input
     const findInput = () => {
@@ -373,19 +406,19 @@ export default function ContentApp({
           document.activeElement.getAttribute('aria-label') === 'Title')) {
         const active = document.activeElement as HTMLInputElement
         if (active !== titleInput) {
-          // console.log('[Jira Sync] Found active title input', active)
+          console.log(`${logPrefix} Step: detected active title input`)
           setTitleInput(active)
           return
         }
       }
 
-      const input = root.querySelector('input[aria-label="Add title"]') ||
-        root.querySelector('input[aria-label="Title"]') ||
-        root.querySelector('input[type="text"][aria-label*="title" i]') as HTMLInputElement
+      const input = findVisibleTitleInput(root)
 
       if (input && input !== titleInput) {
-        // console.log('[Jira Sync] Found new title input', input)
-        setTitleInput(input as HTMLInputElement)
+        console.log(`${logPrefix} Step: resolved visible title input from DOM`)
+        setTitleInput(input)
+      } else if (!input && titleInput && (!titleInput.isConnected || !isElementVisible(titleInput))) {
+        setTitleInput(undefined)
       }
     }
 
@@ -399,7 +432,7 @@ export default function ContentApp({
           target.getAttribute('aria-label') === 'Title' ||
           target.getAttribute('aria-label') === 'Add title and time')) { // Added 'Add title and time' for quick add bubble
         if (target !== titleInput) {
-          // console.log('[Jira Sync] Detected focus on new title input', target)
+          console.log(`${logPrefix} Step: title input focus listener detected new input`)
           setTitleInput(target)
         }
       }
@@ -417,21 +450,25 @@ export default function ContentApp({
   useEffect(() => {
     const checkKey = () => {
       let value = ''
-      if (titleInput) {
+      const hasUsableTitleInput = !!titleInput && titleInput.isConnected && isElementVisible(titleInput)
+      if (hasUsableTitleInput && titleInput) {
         value = titleInput.value
       } else if (titleEl) {
         value = titleEl.textContent || ''
       }
 
-      const match = value.match(/^\[?([A-Z]+-\d+)\]?/)
-      if (match) {
-        setLinkedKey(match[1])
-      } else {
-        setLinkedKey(null)
-      }
+      const nextKey = extractLinkedIssueKey(value)
+      setLinkedKey(prev => {
+        const next = nextKey || null
+        if (prev !== next) {
+          console.log(`${logPrefix} Step: linked key changed`, { previous: prev, next })
+        }
+        return next
+      })
     }
 
     checkKey()
+    const poller = setInterval(checkKey, 500)
 
     if (titleInput) {
       const handleInput = () => checkKey()
@@ -440,6 +477,7 @@ export default function ContentApp({
       titleInput.addEventListener('keyup', handleInput) // Catch keyups just in case
 
       return () => {
+        clearInterval(poller)
         titleInput.removeEventListener('input', handleInput)
         titleInput.removeEventListener('change', handleInput)
         titleInput.removeEventListener('keyup', handleInput)
@@ -448,8 +486,13 @@ export default function ContentApp({
       // Observe changes to title element text
       const observer = new MutationObserver(checkKey)
       observer.observe(titleEl, { childList: true, characterData: true, subtree: true })
-      return () => observer.disconnect()
+      return () => {
+        clearInterval(poller)
+        observer.disconnect()
+      }
     }
+
+    return () => clearInterval(poller)
   }, [titleInput, titleEl])
 
   // Fetch linked issue details (status)
@@ -459,6 +502,8 @@ export default function ContentApp({
     enabled: !!linkedKey,
     staleTime: 1000 * 60 * 5,
   })
+
+  const linkedIssueStatus = linkedIssue?.fields.status?.name
 
   // Fetch transitions for linked issue
   const { data: transitions } = useQuery({
@@ -481,7 +526,7 @@ export default function ContentApp({
 
   // Search Queries
   const { data, isLoading: loading } = useQuery({
-    queryKey: ['issues', debouncedQuery, forceApi],
+    queryKey: ['issues', debouncedQuery, linkedKey, forceApi],
     queryFn: () => searchIssues(debouncedQuery, linkedKey, forceApi),
     enabled: debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -506,7 +551,7 @@ export default function ContentApp({
 
       // Strip existing Jira Key from query if present
       // Only strip if it matches the extension's format [KEY-123]
-      val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
+      val = stripLinkedIssuePrefix(val)
 
       setQuery((prev) => {
         if (prev !== val) {
@@ -525,7 +570,7 @@ export default function ContentApp({
     // Initial value
     if (titleInput.value) {
       let val = titleInput.value
-      val = val.replace(/^\[[A-Z]+-\d+\]\s*/, '')
+      val = stripLinkedIssuePrefix(val)
       if (query !== val) {
         setTimeout(() => setQuery(val), 0)
       }
@@ -584,14 +629,14 @@ export default function ContentApp({
   }, [debouncedQuery, results.length, loading, source, open, isFocused])
 
   const handleSelect = async (issue: JiraIssue) => {
+    console.log(`${logPrefix} Step: user selected issue`, { key: issue.key })
     setQuery('')
     setForceApi(false)
     setOpen(false)
+    setDescriptionFocusVisible(false)
 
     // Update Google Calendar Title
     const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
-    const currentTitle = (input?.value || titleEl?.textContent || '').trim()
-    const movedTitle = currentTitle.replace(/^\[?[A-Z]+-\d+\]?\s*/, '').trim()
     const newTitle = `[${issue.key}] ${issue.fields.summary}`
 
     if (input) {
@@ -601,9 +646,8 @@ export default function ContentApp({
       setTextControlValue(input, newTitle)
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
+      console.log(`${logPrefix} Step: title updated`, { newTitle })
     }
-
-    if (!movedTitle) return
 
     const roots: ParentNode[] = []
     if (container) roots.push(container)
@@ -612,28 +656,14 @@ export default function ContentApp({
     const { editor: descriptionEditor, openControlFound } = await resolveDescriptionEditor(roots)
     if (!descriptionEditor) {
       if (!openControlFound) {
-        console.warn('[Jira Sync] Failed to find description open control')
+        console.warn(`${logPrefix} Step failed: description open control not found`)
       }
-      console.warn('[Jira Sync] Failed to find description editor to move title')
+      console.warn(`${logPrefix} Step failed: description editor not found`)
       return
     }
 
-    const existingDescription = getEditorValue(descriptionEditor).trim()
-    const normalizedMovedTitle = normalizeForDuplicateCheck(movedTitle)
-    const normalizedExisting = normalizeForDuplicateCheck(existingDescription)
-    const shouldInsertMovedTitle = normalizedMovedTitle.length > 0 && !normalizedExisting.includes(normalizedMovedTitle)
-
-    const nextDescription = shouldInsertMovedTitle
-      ? (existingDescription ? `${movedTitle}\n\n${existingDescription}` : movedTitle)
-      : existingDescription
-
-    if (shouldInsertMovedTitle) {
-      setEditorValue(descriptionEditor, nextDescription)
-    }
-
-    const caretPosition = shouldInsertMovedTitle
-      ? (existingDescription ? movedTitle.length + 2 : movedTitle.length)
-      : nextDescription.length
+    const existingDescription = getEditorValue(descriptionEditor)
+    const caretPosition = existingDescription.length
 
     const updatedEditor = getDescriptionEditor(roots)
     const focusTarget = updatedEditor && updatedEditor.isConnected ? updatedEditor : descriptionEditor
@@ -643,27 +673,33 @@ export default function ContentApp({
       () => getDescriptionEditor(roots),
     )
     if (!focused) {
-      console.warn('[Jira Sync] Failed to lock focus on description editor')
+      console.warn(`${logPrefix} Step failed: description focus lock failed`)
+      return
     }
+
+    console.log(`${logPrefix} Step: description focused`)
+    setDescriptionFocusVisible(true)
+    setTimeout(() => setDescriptionFocusVisible(false), 2000)
   }
 
   return (
-    <div className="jira-sync-overlay font-sans text-left relative">
-      {/* Status Badge & Dropdown - Only show if we have a linked key AND we are in Bubble view (titleElement exists) */}
-      {linkedKey && linkedIssue && titleEl && (
-        <div className="absolute right-0 -top-8 z-50">
+    <div className={cn('jira-sync-overlay font-sans text-left relative', isBubbleView ? 'absolute top-0 right-0 z-50' : '')}>
+      {linkedKey && (
+        <div className={cn(isBubbleView ? 'relative' : 'absolute right-0 top-7 z-50')}>
           <Popover>
             <PopoverTrigger asChild>
               <button
                 className={cn(
-                  "flex items-center gap-1.5 p-1 w-25 rounded-sm mt-7 text-xs justify-between font-medium transition-colors border shadow-sm hover:cursor-pointer",
-                  linkedIssue.fields.status?.name === 'In Progress' ? "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200" :
-                    linkedIssue.fields.status?.name === 'Done' ? "bg-green-100 text-green-700 border-green-200 hover:bg-green-200" :
-                      "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+                  "inline-flex !w-auto max-w-[140px] items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors border shadow-sm hover:cursor-pointer",
+                  linkedIssueStatus === 'In Progress'
+                    ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:border-blue-900'
+                    : linkedIssueStatus === 'Done'
+                      ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200 dark:bg-green-950/40 dark:text-green-200 dark:border-green-900'
+                      : 'bg-muted text-foreground border-border hover:bg-accent'
                 )}
               >
                 {transitionMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                <span className="truncate">{linkedIssue.fields.status?.name || 'Unknown'}</span>
+                <span className="truncate">{linkedIssueStatus || 'Loading...'}</span>
                 <ChevronDown className="h-3 w-3 opacity-50" />
               </button>
             </PopoverTrigger>
@@ -682,7 +718,7 @@ export default function ContentApp({
                   className="w-full text-left px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between"
                 >
                   {t.name}
-                  {linkedIssue.fields.status?.name === (t as unknown as { to?: { name: string } }).to?.name && <Check className="h-3 w-3" />}
+                  {linkedIssueStatus === (t as unknown as { to?: { name: string } }).to?.name && <Check className="h-3 w-3" />}
                 </button>
               ))}
               {(!transitions || transitions.length === 0) && (
@@ -692,6 +728,12 @@ export default function ContentApp({
               )}
             </PopoverContent>
           </Popover>
+        </div>
+      )}
+
+      {descriptionFocusVisible && (
+        <div className="mb-2 text-xs text-emerald-600 font-medium">
+          Description focused
         </div>
       )}
 

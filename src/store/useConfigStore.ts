@@ -14,6 +14,7 @@ interface ConfigState {
   toggleProject: (projectKey: string) => void
   setProjects: (projects: Project[]) => void
   setLastLoggedTime: (date: string, time: string) => void
+  clearLastLoggedTime: (date: string) => void
   isConfigured: () => boolean
 }
 
@@ -46,6 +47,12 @@ export const useConfigStore = create<ConfigState>()(
           datesToRemove.forEach(d => delete newTimes[d])
         }
         
+        return { lastLoggedTimes: newTimes }
+      }),
+      clearLastLoggedTime: (date) => set((state) => {
+        if (!state.lastLoggedTimes[date]) return state
+        const newTimes = { ...state.lastLoggedTimes }
+        delete newTimes[date]
         return { lastLoggedTimes: newTimes }
       }),
       isConfigured: () => {

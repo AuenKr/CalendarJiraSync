@@ -25,6 +25,16 @@ export interface TransitionIssueResponse {
   success: boolean
 }
 
+export interface ResetExtensionWorklogsByDatePayload {
+  date: string
+}
+
+export interface ResetExtensionWorklogsByDateResponse {
+  deletedCount: number
+  matchedCount: number
+  scannedIssues: number
+}
+
 export type MessageType = 
   | 'SEARCH_ISSUES'
   | 'ADD_WORKLOG'
@@ -37,6 +47,7 @@ export type MessageType =
   | 'GET_ISSUE'
   | 'GET_TRANSITIONS'
   | 'TRANSITION_ISSUE'
+  | 'RESET_EXTENSION_WORKLOGS_BY_DATE'
 
 export interface CalendarEvent {
   id?: string
@@ -96,6 +107,7 @@ export interface MessageRequest {
     | GetIssuePayload
     | GetTransitionsPayload
     | TransitionIssuePayload
+    | ResetExtensionWorklogsByDatePayload
     | Record<string, never>
 }
 

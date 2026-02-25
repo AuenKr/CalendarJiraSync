@@ -1,30 +1,44 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, addWorklog, type JiraProject } from '../lib/jira'
+import { syncData, getProjects, addWorklog, resetExtensionWorklogsByDate, type JiraProject } from '../lib/jira'
 import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
 import type { CalendarEvent } from '@/types/messages'
+import { buildWorklogComment, createExtensionWorklogMetadata, getLocalDateString } from '@/lib/worklogMetadata'
 
 function App() {
-  const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTimes, setLastLoggedTime } = useConfigStore()
+  const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTimes, setLastLoggedTime, clearLastLoggedTime } = useConfigStore()
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
   const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
   const [loggingTime, setLoggingTime] = useState(false)
+  const [resettingWorklogs, setResettingWorklogs] = useState(false)
   const [logResult, setLogResult] = useState<string>('')
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    // Initialize with local date YYYY-MM-DD
-    const d = new Date()
-    const offset = d.getTimezoneOffset()
-    const local = new Date(d.getTime() - (offset * 60 * 1000))
-    return local.toISOString().split('T')[0]
-  })
+  const [resetResult, setResetResult] = useState<string>('')
+  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateString(new Date()))
+  const logPrefix = '[Jira Sync][Popup]'
+
+  const getDayBounds = (date: string) => {
+    const dayStart = new Date(`${date}T00:00:00`)
+    const dayEnd = new Date(`${date}T23:59:59.999`)
+    return { dayStart, dayEnd }
+  }
+
+  const getOverlapWindow = (startTime: Date, endTime: Date, date: string) => {
+    const { dayStart, dayEnd } = getDayBounds(date)
+    const overlapStart = new Date(Math.max(startTime.getTime(), dayStart.getTime()))
+    const overlapEnd = new Date(Math.min(endTime.getTime(), dayEnd.getTime()))
+    if (overlapEnd.getTime() <= overlapStart.getTime()) return null
+    return { overlapStart, overlapEnd }
+  }
 
   const handleLogTime = async () => {
     setLoggingTime(true)
     setLogResult('')
+    setResetResult('')
+    console.log(`${logPrefix} Step 1: log flow started`, { selectedDate })
     
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -44,7 +58,7 @@ function App() {
       }
       
       const events = response.events as CalendarEvent[]
-      // console.log('[Jira Sync] Fetched events from content script:', events)
+      console.log(`${logPrefix} Step 2: fetched events from content`, { count: events.length })
 
       let loggedCount = 0
       let errors = 0
@@ -63,41 +77,31 @@ function App() {
         }
       }
       const processedEvents = Array.from(uniqueEvents.values())
-      // console.log('[Jira Sync] 1. Fetched all events:', processedEvents)
+      console.log(`${logPrefix} Step 3: deduplicated events`, { count: processedEvents.length })
 
       const filteredEvents: CalendarEvent[] = []
 
       for (const event of processedEvents) {
-        // Check if event is on the selected date
-        const eventDate = new Date(event.startTime)
-        
-        // Get local YYYY-MM-DD for the event
-        const offset = eventDate.getTimezoneOffset()
-        const localEventDate = new Date(eventDate.getTime() - (offset * 60 * 1000))
-        const eventDateStr = localEventDate.toISOString().split('T')[0]
-
-        if (eventDateStr !== selectedDate) {
-           continue
-        }
-
         // Check for Jira Key: [KEY-123]
         const match = event.title.match(/\[([A-Z]+-\d+)\]/)
         
         // Calculate duration
         const startTime = new Date(event.startTime)
         const endTime = new Date(event.endTime)
-        const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000
+        const overlap = getOverlapWindow(startTime, endTime, selectedDate)
+        if (!overlap) {
+          continue
+        }
+        const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
 
         // Rule 1: Completed Events Only (Current Time > Event End Time)
         // We allow a small buffer (e.g. 1 minute) to account for clock skew
         if (endTime.getTime() > currentTime.getTime()) {
-          // console.log(`[Jira Sync] Skipping in-progress/future event: ${event.title}`)
           continue
         }
 
         // Rule 2: Strict Cutoff (Event End Time > Last Logged Time)
-        if (lastLoggedTime && endTime.getTime() <= lastLoggedTime.getTime()) {
-          // console.log(`[Jira Sync] Skipping already logged event: ${event.title}`)
+        if (lastLoggedTime && overlap.overlapEnd.getTime() <= lastLoggedTime.getTime()) {
           continue
         }
 
@@ -105,12 +109,9 @@ function App() {
             filteredEvents.push(event)
         }
       }
-
-      // console.log('[Jira Sync] 2. Filtered events (Date + Jira Key + Rules):', filteredEvents)
+      console.log(`${logPrefix} Step 4: filtered events`, { eligible: filteredEvents.length })
 
       for (const event of filteredEvents) {
-        // console.log('[Jira Sync] 3. Processing event:', event.title)
-        
         const match = event.title.match(/\[([A-Z]+-\d+)\]/)
         if (!match) continue
 
@@ -118,13 +119,15 @@ function App() {
         
         const startTime = new Date(event.startTime)
         const endTime = new Date(event.endTime)
-        const durationSeconds = (endTime.getTime() - startTime.getTime()) / 1000
+        const overlap = getOverlapWindow(startTime, endTime, selectedDate)
+        if (!overlap) continue
+        const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
           
           try {
             // Fetch description if event ID is available
             let description = event.description
             if (!description && event.id) {
-               // console.log(`[Jira Sync] Fetching description for event ${event.id}`)
+               console.log(`${logPrefix} Step 5: fetching description`, { issueKey, eventId: event.id })
                const descResponse = await chrome.tabs.sendMessage(tab.id, { 
                  type: 'FETCH_EVENT_DESCRIPTION', 
                  payload: { eventId: event.id } 
@@ -132,22 +135,21 @@ function App() {
                if (descResponse && descResponse.description) {
                  description = descResponse.description
                  event.description = description
-                 // console.log(`[Jira Sync] Fetched description for ${issueKey}:`, description)
                }
             }
 
-            const startStr = startTime.toLocaleTimeString()
-            const endStr = endTime.toLocaleTimeString()
-            let comment = `Start: ${startStr}\nEnd: ${endStr}`
-            if (description?.trim()) {
-              comment += `\n\n${description.trim()}`
-            }
+            const comment = buildWorklogComment({
+              startTime: overlap.overlapStart,
+              endTime: overlap.overlapEnd,
+              description,
+              metadata: createExtensionWorklogMetadata(selectedDate, event.id),
+            })
             
             // Format date for Jira (replace Z with +0000 to ensure compatibility)
-            const jiraStarted = new Date(event.startTime).toISOString().replace('Z', '+0000')
+            const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
             
             await addWorklog(issueKey, durationSeconds, jiraStarted, comment)
-            // console.log(`[Jira Sync] 3b. Successfully logged time for: ${issueKey}, Duration: ${durationSeconds}s`)
+            console.log(`${logPrefix} Step 6: worklog added`, { issueKey, durationSeconds })
             loggedCount++
           } catch (e) {
             console.error(`[Jira Sync] Failed to log worklog for ${issueKey}`, e)
@@ -163,6 +165,7 @@ function App() {
           // Update last logged time for this date to NOW
           setLastLoggedTime(selectedDate, new Date().toISOString())
         }
+        console.log(`${logPrefix} Step 7: log flow completed`, { loggedCount, errors })
       }
     } catch (e: unknown) {
       console.error(e)
@@ -174,6 +177,34 @@ function App() {
       }
     } finally {
       setLoggingTime(false)
+    }
+  }
+
+  const handleResetWorklogs = async () => {
+    setResettingWorklogs(true)
+    setResetResult('')
+    setLogResult('')
+    console.log(`${logPrefix} Reset Step 1: reset flow started`, { selectedDate })
+
+    try {
+      const result = await resetExtensionWorklogsByDate(selectedDate)
+      console.log(`${logPrefix} Reset Step 2: reset response`, result)
+
+      if (result.deletedCount > 0) {
+        clearLastLoggedTime(selectedDate)
+      }
+
+      if (result.matchedCount === 0) {
+        setResetResult('No extension worklogs found for selected date')
+      } else {
+        setResetResult(`Deleted ${result.deletedCount}/${result.matchedCount} extension worklog${result.matchedCount !== 1 ? 's' : ''}`)
+      }
+    } catch (e) {
+      console.error('[Jira Sync] Failed to reset worklogs', e)
+      setResetResult('Failed to reset worklogs')
+    } finally {
+      setResettingWorklogs(false)
+      console.log(`${logPrefix} Reset Step 3: reset flow finished`)
     }
   }
 
@@ -328,11 +359,19 @@ function App() {
                </div>
                <button
                 onClick={handleLogTime}
-                disabled={loggingTime}
+                disabled={loggingTime || resettingWorklogs}
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Calendar size={16} className={loggingTime ? "animate-pulse" : ""} />
                 {loggingTime ? 'Logging Time...' : 'Log Time'}
+              </button>
+              <button
+                onClick={handleResetWorklogs}
+                disabled={resettingWorklogs || loggingTime}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <RefreshCw size={16} className={resettingWorklogs ? "animate-spin" : ""} />
+                {resettingWorklogs ? 'Resetting...' : 'Reset Worklogs'}
               </button>
               {lastLoggedTimes[selectedDate] && (
                 <p className="text-[10px] text-center text-gray-500">
@@ -342,6 +381,11 @@ function App() {
               {logResult && (
                 <p className={`text-xs text-center mt-2 ${logResult.includes('Failed') || logResult.includes('Please') ? 'text-red-400' : 'text-green-400'}`}>
                   {logResult}
+                </p>
+              )}
+              {resetResult && (
+                <p className={`text-xs text-center ${resetResult.includes('Failed') ? 'text-red-400' : 'text-yellow-300'}`}>
+                  {resetResult}
                 </p>
               )}
             </div>

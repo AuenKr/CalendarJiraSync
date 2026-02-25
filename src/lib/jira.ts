@@ -19,6 +19,8 @@ import type {
   GetTransitionsResponse,
   TransitionIssuePayload,
   TransitionIssueResponse,
+  ResetExtensionWorklogsByDatePayload,
+  ResetExtensionWorklogsByDateResponse,
 } from '../types/messages'
 
 // Re-export types for UI components
@@ -67,14 +69,14 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
       const lastSync = stored.last_sync ? new Date(stored.last_sync).getTime() : 0
       const staleMs = Date.now() - lastSync
       if (staleMs > TTL) {
-        console.info(
+        console.log(
           `[Jira Sync] Task cache invalidated (stale by ${Math.max(0, Math.floor(staleMs / 1000))}s). Triggering automatic refresh...`,
         )
 
         // Trigger background sync (fire and forget)
         sendToBackground<SyncDataResponse>('SYNC_DATA', {})
           .then((result: SyncDataResponse) => {
-            console.info(`[Jira Sync] Automatic task refresh completed. Synced ${result.count} tasks.`)
+            console.log(`[Jira Sync] Automatic task refresh completed. Synced ${result.count} tasks.`)
           })
           .catch((e) => {
             console.error('[Jira Sync] Automatic task refresh failed', e)
@@ -171,4 +173,9 @@ export const getTransitions = async (issueKey: string): Promise<JiraTransition[]
 export const transitionIssue = async (issueKey: string, transitionId: string): Promise<void> => {
   const payload: TransitionIssuePayload = { issueKey, transitionId }
   await sendToBackground<TransitionIssueResponse>('TRANSITION_ISSUE', payload)
+}
+
+export const resetExtensionWorklogsByDate = async (date: string): Promise<ResetExtensionWorklogsByDateResponse> => {
+  const payload: ResetExtensionWorklogsByDatePayload = { date }
+  return await sendToBackground<ResetExtensionWorklogsByDateResponse>('RESET_EXTENSION_WORKLOGS_BY_DATE', payload)
 }
