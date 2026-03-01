@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, addWorklog, resetExtensionWorklogsByDate, type JiraProject } from '../lib/jira'
+import { syncData, getProjects, type JiraProject } from '../lib/jira'
 import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
-import type { CalendarEvent } from '@/types/messages'
-import { buildWorklogComment, createExtensionWorklogMetadata, getLocalDateString } from '@/lib/worklogMetadata'
+import { getLocalDateString } from '@/lib/worklogMetadata'
+import { logTimeForDateInActiveCalendarTab, resetWorklogsForDate } from '@/lib/timeLogging'
 
 function App() {
-  const { isConfigured, selectedProjectKeys, toggleProject, projects: storedProjects, setProjects, lastLoggedTimes, setLastLoggedTime, clearLastLoggedTime } = useConfigStore()
+  const {
+    isConfigured,
+    calendarDockEnabled,
+    setCalendarDockEnabled,
+    selectedProjectKeys,
+    toggleProject,
+    projects: storedProjects,
+    setProjects,
+    lastLoggedTimes,
+    setLastLoggedTime,
+    clearLastLoggedTime,
+  } = useConfigStore()
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
   const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
@@ -20,160 +31,21 @@ function App() {
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateString(new Date()))
   const logPrefix = '[Jira Sync][Popup]'
 
-  const getDayBounds = (date: string) => {
-    const dayStart = new Date(`${date}T00:00:00`)
-    const dayEnd = new Date(`${date}T23:59:59.999`)
-    return { dayStart, dayEnd }
-  }
-
-  const getOverlapWindow = (startTime: Date, endTime: Date, date: string) => {
-    const { dayStart, dayEnd } = getDayBounds(date)
-    const overlapStart = new Date(Math.max(startTime.getTime(), dayStart.getTime()))
-    const overlapEnd = new Date(Math.min(endTime.getTime(), dayEnd.getTime()))
-    if (overlapEnd.getTime() <= overlapStart.getTime()) return null
-    return { overlapStart, overlapEnd }
-  }
-
   const handleLogTime = async () => {
     setLoggingTime(true)
     setLogResult('')
     setResetResult('')
     console.log(`${logPrefix} Step 1: log flow started`, { selectedDate })
-    
+
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) throw new Error('No active tab')
-      
-      // Check if we are on Google Calendar
-      if (!tab.url?.includes('calendar.google.com')) {
-        setLogResult('Please go to Google Calendar')
-        return
-      }
+      const result = await logTimeForDateInActiveCalendarTab({
+        date: selectedDate,
+        lastLoggedTime: lastLoggedTimes[selectedDate],
+      })
 
-      // Send message to content script
-      const response = await chrome.tabs.sendMessage(tab.id, { type: 'FETCH_CALENDAR_EVENTS' })
-      
-      if (!response || !response.events) {
-        throw new Error('No events found')
-      }
-      
-      const events = response.events as CalendarEvent[]
-      console.log(`${logPrefix} Step 2: fetched events from content`, { count: events.length })
-
-      let loggedCount = 0
-      let errors = 0
-      
-      const currentTime = new Date()
-
-      // Get last logged time for this date
-      const lastLoggedTimeStr = lastLoggedTimes[selectedDate]
-      const lastLoggedTime = lastLoggedTimeStr ? new Date(lastLoggedTimeStr) : null
-
-      // Deduplicate events by ID to avoid multiple API calls for the same event
-      const uniqueEvents = new Map<string, CalendarEvent>()
-      for (const event of events) {
-        if (event.id && !uniqueEvents.has(event.id)) {
-          uniqueEvents.set(event.id, event)
-        }
-      }
-      const processedEvents = Array.from(uniqueEvents.values())
-      console.log(`${logPrefix} Step 3: deduplicated events`, { count: processedEvents.length })
-
-      const filteredEvents: CalendarEvent[] = []
-
-      for (const event of processedEvents) {
-        // Check for Jira Key: [KEY-123]
-        const match = event.title.match(/\[([A-Z]+-\d+)\]/)
-        
-        // Calculate duration
-        const startTime = new Date(event.startTime)
-        const endTime = new Date(event.endTime)
-        const overlap = getOverlapWindow(startTime, endTime, selectedDate)
-        if (!overlap) {
-          continue
-        }
-        const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
-
-        // Rule 1: Completed Events Only (Current Time > Event End Time)
-        // We allow a small buffer (e.g. 1 minute) to account for clock skew
-        if (endTime.getTime() > currentTime.getTime()) {
-          continue
-        }
-
-        // Rule 2: Strict Cutoff (Event End Time > Last Logged Time)
-        if (lastLoggedTime && overlap.overlapEnd.getTime() <= lastLoggedTime.getTime()) {
-          continue
-        }
-
-        if (match && match[1] && durationSeconds > 0 && event.startTime) {
-            filteredEvents.push(event)
-        }
-      }
-      console.log(`${logPrefix} Step 4: filtered events`, { eligible: filteredEvents.length })
-
-      for (const event of filteredEvents) {
-        const match = event.title.match(/\[([A-Z]+-\d+)\]/)
-        if (!match) continue
-
-        const issueKey = match[1]
-        
-        const startTime = new Date(event.startTime)
-        const endTime = new Date(event.endTime)
-        const overlap = getOverlapWindow(startTime, endTime, selectedDate)
-        if (!overlap) continue
-        const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
-          
-          try {
-            // Fetch description if event ID is available
-            let description = event.description
-            if (!description && event.id) {
-               console.log(`${logPrefix} Step 5: fetching description`, { issueKey, eventId: event.id })
-               const descResponse = await chrome.tabs.sendMessage(tab.id, { 
-                 type: 'FETCH_EVENT_DESCRIPTION', 
-                 payload: { eventId: event.id } 
-               })
-               if (descResponse && descResponse.description) {
-                 description = descResponse.description
-                 event.description = description
-               }
-            }
-
-            const comment = buildWorklogComment({
-              startTime: overlap.overlapStart,
-              endTime: overlap.overlapEnd,
-              description,
-              metadata: createExtensionWorklogMetadata(selectedDate, event.id),
-            })
-            
-            // Format date for Jira (replace Z with +0000 to ensure compatibility)
-            const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
-            
-            await addWorklog(issueKey, durationSeconds, jiraStarted, comment)
-            console.log(`${logPrefix} Step 6: worklog added`, { issueKey, durationSeconds })
-            loggedCount++
-          } catch (e) {
-            console.error(`[Jira Sync] Failed to log worklog for ${issueKey}`, e)
-            errors++
-          }
-      }
-
-      if (loggedCount === 0 && errors === 0) {
-        setLogResult('No new completed tasks found to log')
-      } else {
-        setLogResult(`Logged ${loggedCount} Event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}!`)
-        if (loggedCount > 0) {
-          // Update last logged time for this date to NOW
-          setLastLoggedTime(selectedDate, new Date().toISOString())
-        }
-        console.log(`${logPrefix} Step 7: log flow completed`, { loggedCount, errors })
-      }
-    } catch (e: unknown) {
-      console.error(e)
-      const err = e as Error
-      if (err.message && err.message.includes('Receiving end does not exist')) {
-        setLogResult('Please refresh the Calendar page')
-      } else {
-        setLogResult('Failed. Refresh Calendar page.')
+      setLogResult(result.message)
+      if (result.newLastLoggedTime) {
+        setLastLoggedTime(selectedDate, result.newLastLoggedTime)
       }
     } finally {
       setLoggingTime(false)
@@ -187,21 +59,14 @@ function App() {
     console.log(`${logPrefix} Reset Step 1: reset flow started`, { selectedDate })
 
     try {
-      const result = await resetExtensionWorklogsByDate(selectedDate)
+      const result = await resetWorklogsForDate(selectedDate)
       console.log(`${logPrefix} Reset Step 2: reset response`, result)
 
       if (result.deletedCount > 0) {
         clearLastLoggedTime(selectedDate)
       }
 
-      if (result.matchedCount === 0) {
-        setResetResult('No extension worklogs found for selected date')
-      } else {
-        setResetResult(`Deleted ${result.deletedCount}/${result.matchedCount} extension worklog${result.matchedCount !== 1 ? 's' : ''}`)
-      }
-    } catch (e) {
-      console.error('[Jira Sync] Failed to reset worklogs', e)
-      setResetResult('Failed to reset worklogs')
+      setResetResult(result.message)
     } finally {
       setResettingWorklogs(false)
       console.log(`${logPrefix} Reset Step 3: reset flow finished`)
@@ -406,6 +271,21 @@ function App() {
             </button>
           </>
         )}
+
+        <div className="w-full bg-gray-800 rounded-lg p-3 border border-gray-700 mt-2">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <p className="text-sm font-medium text-gray-200">Show in-calendar Log time button</p>
+              <p className="text-[11px] text-gray-500">Toggle bottom-right button inside Google Calendar view</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={calendarDockEnabled}
+              onChange={(e) => setCalendarDockEnabled(e.target.checked)}
+              className="h-4 w-4 accent-blue-500 cursor-pointer"
+            />
+          </label>
+        </div>
       </div>
     </div>
   )

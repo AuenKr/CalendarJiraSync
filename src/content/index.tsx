@@ -3,10 +3,16 @@ import { StrictMode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '../lib/queryClient'
 import ContentApp from './ContentApp'
+import CalendarDock from './CalendarDock'
 import { scrapeEvents, fetchEventDescription } from './scraper'
 import styles from '../index.css?inline'
 
 const MOUNT_POINT_ID = 'calendar-jira-sync-root'
+const DOCK_MOUNT_POINT_ID = 'calendar-jira-sync-dock-root'
+const CONFIG_STORAGE_KEY = 'jira-sync-config'
+const logPrefix = '[Jira Sync][Content][Dock]'
+let dockEnabled = true
+let lastDockDebugKey = ''
 
 // console.log('[Calendar Jira Sync] Content script loaded')
 
@@ -32,6 +38,45 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false
 })
 
+function readDockEnabledFromStorageValue(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'string') return true
+  try {
+    const parsed = JSON.parse(raw) as { state?: { calendarDockEnabled?: boolean }, calendarDockEnabled?: boolean }
+    if (typeof parsed.state?.calendarDockEnabled === 'boolean') {
+      return parsed.state.calendarDockEnabled
+    }
+    if (typeof parsed.calendarDockEnabled === 'boolean') {
+      return parsed.calendarDockEnabled
+    }
+  } catch (e) {
+    console.warn(`${logPrefix} Failed to parse storage value`, e)
+  }
+  return true
+}
+
+async function loadDockEnabledPreference() {
+  try {
+    const storage = await chrome.storage.local.get(CONFIG_STORAGE_KEY)
+    dockEnabled = readDockEnabledFromStorageValue(storage[CONFIG_STORAGE_KEY])
+    console.log(`${logPrefix} Preference loaded`, { dockEnabled })
+  } catch (e) {
+    console.warn(`${logPrefix} Failed to read preference, using default`, e)
+    dockEnabled = true
+  }
+}
+
+function logDockDebug(reason: string, details?: Record<string, unknown>) {
+  const detailText = details ? JSON.stringify(details) : ''
+  const key = `${reason}|${detailText}`
+  if (key === lastDockDebugKey) return
+  lastDockDebugKey = key
+  if (details) {
+    console.log(`${logPrefix} ${reason}`, details)
+  } else {
+    console.log(`${logPrefix} ${reason}`)
+  }
+}
+
 function applyThemeToElement(element: Element) {
   const bodyBg = window.getComputedStyle(document.body).backgroundColor
   const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
@@ -43,7 +88,7 @@ function applyThemeToElement(element: Element) {
   }
 }
 
-function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: HTMLDivElement } {
+function createShadowRootMount(host: HTMLElement, rootClassName = 'calendar-jira-sync-root'): { shadow: ShadowRoot, root: HTMLDivElement } {
   host.style.background = 'transparent'
   const shadow = host.attachShadow({ mode: 'open' })
 
@@ -52,7 +97,7 @@ function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: H
   shadow.appendChild(style)
 
   const root = document.createElement('div')
-  root.className = 'calendar-jira-sync-root'
+  root.className = rootClassName
   root.style.background = 'transparent'
   applyThemeToElement(root)
   shadow.appendChild(root)
@@ -86,10 +131,7 @@ function createShadowRootMount(host: HTMLElement): { shadow: ShadowRoot, root: H
 }
 
 function injectApp(modal: Element) {
-  console.log('[Jira Sync][Content] injectApp called', { role: modal.getAttribute('role') || 'none' })
-
   if (modal.querySelector(`#${MOUNT_POINT_ID}`)) {
-    console.log('[Jira Sync][Content] injectApp skipped: already injected in modal')
     return
   }
 
@@ -172,7 +214,6 @@ function injectApp(modal: Element) {
   }
 
   if (!titleInput && !titleElement) {
-    console.log('[Jira Sync][Content] injectApp skipped: no title input/element found')
     return
   }
 
@@ -294,10 +335,168 @@ function resolveInjectionTarget(node: Element): Element | null {
     null
 }
 
+function shouldCheckForInjection(node: Element): boolean {
+  if (node.matches('[role="dialog"], .yDmH0d, .p9lUpf, #xTiIn')) return true
+  return !!node.querySelector('[role="dialog"], .yDmH0d, .p9lUpf, #xTiIn')
+}
+
+function isVisibleElement(el: Element): boolean {
+  const style = window.getComputedStyle(el as HTMLElement)
+  return style.display !== 'none' && style.visibility !== 'hidden' && (el as HTMLElement).getClientRects().length > 0
+}
+
+function hasOpenEventOverlay(): boolean {
+  if (document.body.getAttribute('data-viewfamily') === 'EVENT_EDIT') return true
+
+  // Keep this strict to avoid false positives from unrelated Google Calendar dialogs.
+  const titleInput = document.querySelector('#xTiIn, input[aria-label="Add title"], input[aria-label="Title"]')
+  if (!(titleInput instanceof HTMLElement) || !isVisibleElement(titleInput)) {
+    return false
+  }
+
+  const eventContainer = titleInput.closest('[role="dialog"], .p9lUpf, .yDmH0d')
+  return !!eventContainer && isVisibleElement(eventContainer)
+}
+
+function resolveCalendarContainer(): HTMLElement | null {
+  const main = document.querySelector('[role="main"]')
+  if (main instanceof HTMLElement && isVisibleElement(main)) {
+    return main
+  }
+
+  const fallbackSelectors = [
+    '[data-viewkey="DAY"]',
+    '[data-viewkey="WEEK"]',
+    '[data-viewkey="MONTH"]',
+    '[data-viewkey="SCHEDULE"]',
+    '[role="grid"]',
+  ]
+
+  let best: HTMLElement | null = null
+  let bestArea = 0
+
+  for (const selector of fallbackSelectors) {
+    const nodes = document.querySelectorAll(selector)
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue
+      if (node.closest('[role="dialog"]')) continue
+      if (!isVisibleElement(node)) continue
+
+      const container = (node.closest('[role="main"]') || node.parentElement || node) as HTMLElement
+      const rect = container.getBoundingClientRect()
+      const area = rect.width * rect.height
+
+      if (area > bestArea) {
+        best = container
+        bestArea = area
+      }
+    }
+  }
+
+  return best
+}
+
+function updateDockPosition(host: HTMLElement, container: HTMLElement) {
+  if (window.getComputedStyle(container).position === 'static') {
+    container.style.position = 'relative'
+  }
+
+  host.style.position = 'absolute'
+  host.style.zIndex = '2147483000'
+  host.style.right = '24px'
+  host.style.bottom = '24px'
+  host.style.left = 'auto'
+  host.style.top = 'auto'
+  host.style.pointerEvents = 'auto'
+}
+
+function ensureDockMount() {
+  const existingHost = document.getElementById(DOCK_MOUNT_POINT_ID) as HTMLElement | null
+
+  if (!dockEnabled) {
+    if (existingHost) {
+      existingHost.style.display = 'none'
+    }
+    logDockDebug('hidden: disabled by user setting')
+    return
+  }
+
+  if (hasOpenEventOverlay()) {
+    if (existingHost) {
+      existingHost.style.display = 'none'
+    }
+    logDockDebug('hidden: event overlay open')
+    return
+  }
+
+  const container = resolveCalendarContainer()
+  if (!container) {
+    if (existingHost) {
+      existingHost.style.display = 'none'
+    }
+    logDockDebug('hidden: no calendar container resolved')
+    return
+  }
+
+  if (existingHost) {
+    if (existingHost.parentElement !== container) {
+      container.appendChild(existingHost)
+    }
+    existingHost.style.display = 'block'
+    updateDockPosition(existingHost, container)
+    const rect = container.getBoundingClientRect()
+    const hostRect = existingHost.getBoundingClientRect()
+    logDockDebug('shown: reused existing dock host', {
+      containerWidth: Math.round(rect.width),
+      containerHeight: Math.round(rect.height),
+      hostX: Math.round(hostRect.x),
+      hostY: Math.round(hostRect.y),
+      hostWidth: Math.round(hostRect.width),
+      hostHeight: Math.round(hostRect.height),
+      hostZ: existingHost.style.zIndex,
+    })
+    return
+  }
+
+  const host = document.createElement('div')
+  host.id = DOCK_MOUNT_POINT_ID
+  host.style.background = 'transparent'
+  updateDockPosition(host, container)
+  container.appendChild(host)
+
+  const { root } = createShadowRootMount(host, 'calendar-jira-sync-dock-root')
+
+  try {
+    ReactDOM.createRoot(root).render(
+      <StrictMode>
+        <CalendarDock />
+      </StrictMode>
+    )
+    const rect = container.getBoundingClientRect()
+    const hostRect = host.getBoundingClientRect()
+    logDockDebug('shown: mounted dock host', {
+      containerWidth: Math.round(rect.width),
+      containerHeight: Math.round(rect.height),
+      hostX: Math.round(hostRect.x),
+      hostY: Math.round(hostRect.y),
+      hostWidth: Math.round(hostRect.width),
+      hostHeight: Math.round(hostRect.height),
+      hostZ: host.style.zIndex,
+    })
+  } catch (e) {
+    console.error('[Jira Sync][Content] Failed to mount CalendarDock', e)
+  }
+}
+
 const observer = new MutationObserver((mutations) => {
+  let shouldRefreshDock = false
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node instanceof Element) {
+        shouldRefreshDock = true
+        if (!shouldCheckForInjection(node)) {
+          continue
+        }
         const target = resolveInjectionTarget(node)
         if (target) {
           injectApp(target)
@@ -320,12 +519,34 @@ const observer = new MutationObserver((mutations) => {
         injectApp(target)
       }
     }
+
+    for (const node of mutation.removedNodes) {
+      if (!(node instanceof Element)) continue
+      const removedDock = node.id === DOCK_MOUNT_POINT_ID ? node : node.querySelector(`#${DOCK_MOUNT_POINT_ID}`)
+      if (removedDock) {
+        shouldRefreshDock = true
+      }
+    }
+  }
+
+  if (shouldRefreshDock) {
+    ensureDockMount()
   }
 })
 
 // Start observing
 // console.log('[Calendar Jira Sync] Starting observer')
 observer.observe(document.body, { childList: true, subtree: true })
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return
+  const change = changes[CONFIG_STORAGE_KEY]
+  if (!change) return
+
+  dockEnabled = readDockEnabledFromStorageValue(change.newValue)
+  logDockDebug('preference changed', { dockEnabled })
+  ensureDockMount()
+})
 
 function ensureMountOnActiveContainers() {
   const candidates = [
@@ -340,10 +561,19 @@ function ensureMountOnActiveContainers() {
     if (candidate.querySelector(`#${MOUNT_POINT_ID}`)) continue
     injectApp(candidate)
   }
+
+  ensureDockMount()
 }
 
 const mountHealthInterval = window.setInterval(ensureMountOnActiveContainers, 1500)
-window.addEventListener('beforeunload', () => window.clearInterval(mountHealthInterval), { once: true })
+const handleViewportDockRefresh = () => ensureDockMount()
+window.addEventListener('resize', handleViewportDockRefresh)
+window.addEventListener('scroll', handleViewportDockRefresh, true)
+window.addEventListener('beforeunload', () => {
+  window.clearInterval(mountHealthInterval)
+  window.removeEventListener('resize', handleViewportDockRefresh)
+  window.removeEventListener('scroll', handleViewportDockRefresh, true)
+}, { once: true })
 
 // Check if dialog is already open (e.g. on reload)
 const existingDialog = document.querySelector('[role="dialog"]')
@@ -365,3 +595,7 @@ if (existingDialog) {
     injectApp(fullEdit)
   }
 }
+
+void loadDockEnabledPreference().finally(() => {
+  ensureDockMount()
+})

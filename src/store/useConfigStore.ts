@@ -7,10 +7,12 @@ interface ConfigState {
   jiraDomain: string
   email: string
   apiToken: string
+  calendarDockEnabled: boolean
   selectedProjectKeys: string[]
   projects: Project[]
   lastLoggedTimes: Record<string, string> // Date (YYYY-MM-DD) -> ISO Timestamp
   setConfig: (config: { jiraDomain: string; email: string; apiToken: string }) => void
+  setCalendarDockEnabled: (enabled: boolean) => void
   toggleProject: (projectKey: string) => void
   setProjects: (projects: Project[]) => void
   setLastLoggedTime: (date: string, time: string) => void
@@ -24,10 +26,12 @@ export const useConfigStore = create<ConfigState>()(
       jiraDomain: '',
       email: '',
       apiToken: '',
+      calendarDockEnabled: true,
       selectedProjectKeys: [],
       projects: [],
       lastLoggedTimes: {},
       setConfig: (config) => set(config),
+      setCalendarDockEnabled: (enabled) => set({ calendarDockEnabled: enabled }),
       toggleProject: (projectKey) => set((state) => {
         const current = state.selectedProjectKeys || []
         if (current.includes(projectKey)) {
