@@ -957,7 +957,7 @@ export default function ContentApp({
             ))}
 
             {/* Show "Search in Jira" ONLY if we haven't searched API yet (source is local) */}
-            {debouncedQuery.length >= 2 && !loading && source === 'local' && (
+            {debouncedQuery.length >= 2 && !loading && source === 'local' && results.length > 0 && (
               <button
                 onClick={() => setForceApi(true)}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm text-primary flex items-center gap-2 transition-colors border-t border-border"

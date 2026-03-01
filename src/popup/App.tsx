@@ -1,77 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
 import { syncData, getProjects, type JiraProject } from '../lib/jira'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Calendar } from 'lucide-react'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
-import { getLocalDateString } from '@/lib/worklogMetadata'
-import { logTimeForDateInActiveCalendarTab, resetWorklogsForDate } from '@/lib/timeLogging'
 
 function App() {
   const {
     isConfigured,
-    calendarDockEnabled,
-    setCalendarDockEnabled,
     selectedProjectKeys,
     toggleProject,
     projects: storedProjects,
     setProjects,
-    lastLoggedTimes,
-    setLastLoggedTime,
-    clearLastLoggedTime,
   } = useConfigStore()
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
-  const [filteredProjects, setFilteredProjects] = useState<JiraProject[]>([])
-  const [loggingTime, setLoggingTime] = useState(false)
-  const [resettingWorklogs, setResettingWorklogs] = useState(false)
-  const [logResult, setLogResult] = useState<string>('')
-  const [resetResult, setResetResult] = useState<string>('')
-  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateString(new Date()))
-  const logPrefix = '[Jira Sync][Popup]'
-
-  const handleLogTime = async () => {
-    setLoggingTime(true)
-    setLogResult('')
-    setResetResult('')
-    console.log(`${logPrefix} Step 1: log flow started`, { selectedDate })
-
-    try {
-      const result = await logTimeForDateInActiveCalendarTab({
-        date: selectedDate,
-        lastLoggedTime: lastLoggedTimes[selectedDate],
-      })
-
-      setLogResult(result.message)
-      if (result.newLastLoggedTime) {
-        setLastLoggedTime(selectedDate, result.newLastLoggedTime)
-      }
-    } finally {
-      setLoggingTime(false)
-    }
-  }
-
-  const handleResetWorklogs = async () => {
-    setResettingWorklogs(true)
-    setResetResult('')
-    setLogResult('')
-    console.log(`${logPrefix} Reset Step 1: reset flow started`, { selectedDate })
-
-    try {
-      const result = await resetWorklogsForDate(selectedDate)
-      console.log(`${logPrefix} Reset Step 2: reset response`, result)
-
-      if (result.deletedCount > 0) {
-        clearLastLoggedTime(selectedDate)
-      }
-
-      setResetResult(result.message)
-    } finally {
-      setResettingWorklogs(false)
-      console.log(`${logPrefix} Reset Step 3: reset flow finished`)
-    }
-  }
 
   const { data: projects = [], isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
     queryKey: ['projects'],
@@ -89,24 +33,23 @@ function App() {
   }, [projects, setProjects])
 
   // Filter projects using Fuse.js
-  useEffect(() => {
+  const filteredProjects = useMemo(() => {
     if (!searchQuery) {
       // Sort: Selected first, then alphabetical
-      const sorted = [...projects].sort((a, b) => {
+      return [...projects].sort((a, b) => {
         const aSelected = (selectedProjectKeys || []).includes(a.key)
         const bSelected = (selectedProjectKeys || []).includes(b.key)
         if (aSelected && !bSelected) return -1
         if (!aSelected && bSelected) return 1
         return a.name.localeCompare(b.name)
       })
-      setFilteredProjects(sorted)
-      return
     }
+
     const fuse = new Fuse(projects, {
       keys: ['name', 'key'],
-      threshold: 0.3
+      threshold: 0.3,
     })
-    setFilteredProjects(fuse.search(searchQuery).map(r => r.item))
+    return fuse.search(searchQuery).map(r => r.item)
   }, [searchQuery, projects, selectedProjectKeys])
 
   const syncMutation = useMutation({
@@ -211,49 +154,6 @@ function App() {
               {syncMutation.isSuccess && <p className="text-xs text-center mt-2 text-green-400">Synced {syncMutation.data?.count} tasks!</p>}
               {syncMutation.isError && <p className="text-xs text-center mt-2 text-red-400">Sync failed</p>}
             </div>
-
-            <div className="w-full pt-2 border-t border-gray-700 space-y-2">
-               <div className="flex items-center gap-2">
-                 <span className="text-xs text-gray-400">Log Date:</span>
-                 <Input 
-                   type="date" 
-                   value={selectedDate}
-                   onChange={(e) => setSelectedDate(e.target.value)}
-                   className="h-8 bg-gray-900/50 border-gray-700 text-xs flex-1 [color-scheme:dark]"
-                 />
-               </div>
-               <button
-                onClick={handleLogTime}
-                disabled={loggingTime || resettingWorklogs}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <Calendar size={16} className={loggingTime ? "animate-pulse" : ""} />
-                {loggingTime ? 'Logging Time...' : 'Log Time'}
-              </button>
-              <button
-                onClick={handleResetWorklogs}
-                disabled={resettingWorklogs || loggingTime}
-                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <RefreshCw size={16} className={resettingWorklogs ? "animate-spin" : ""} />
-                {resettingWorklogs ? 'Resetting...' : 'Reset Worklogs'}
-              </button>
-              {lastLoggedTimes[selectedDate] && (
-                <p className="text-[10px] text-center text-gray-500">
-                  Last logged: {new Date(lastLoggedTimes[selectedDate]).toLocaleTimeString()}
-                </p>
-              )}
-              {logResult && (
-                <p className={`text-xs text-center mt-2 ${logResult.includes('Failed') || logResult.includes('Please') ? 'text-red-400' : 'text-green-400'}`}>
-                  {logResult}
-                </p>
-              )}
-              {resetResult && (
-                <p className={`text-xs text-center ${resetResult.includes('Failed') ? 'text-red-400' : 'text-yellow-300'}`}>
-                  {resetResult}
-                </p>
-              )}
-            </div>
           </>
         ) : (
           <>
@@ -272,20 +172,6 @@ function App() {
           </>
         )}
 
-        <div className="w-full bg-gray-800 rounded-lg p-3 border border-gray-700 mt-2">
-          <label className="flex items-center justify-between gap-3 cursor-pointer">
-            <div>
-              <p className="text-sm font-medium text-gray-200">Show in-calendar Log time button</p>
-              <p className="text-[11px] text-gray-500">Toggle bottom-right button inside Google Calendar view</p>
-            </div>
-            <input
-              type="checkbox"
-              checked={calendarDockEnabled}
-              onChange={(e) => setCalendarDockEnabled(e.target.checked)}
-              className="h-4 w-4 accent-blue-500 cursor-pointer"
-            />
-          </label>
-        </div>
       </div>
     </div>
   )

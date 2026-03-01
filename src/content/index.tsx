@@ -9,9 +9,7 @@ import styles from '../index.css?inline'
 
 const MOUNT_POINT_ID = 'calendar-jira-sync-root'
 const DOCK_MOUNT_POINT_ID = 'calendar-jira-sync-dock-root'
-const CONFIG_STORAGE_KEY = 'jira-sync-config'
 const logPrefix = '[Jira Sync][Content][Dock]'
-let dockEnabled = true
 let lastDockDebugKey = ''
 
 // console.log('[Calendar Jira Sync] Content script loaded')
@@ -37,33 +35,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return false
 })
-
-function readDockEnabledFromStorageValue(raw: unknown): boolean {
-  if (!raw || typeof raw !== 'string') return true
-  try {
-    const parsed = JSON.parse(raw) as { state?: { calendarDockEnabled?: boolean }, calendarDockEnabled?: boolean }
-    if (typeof parsed.state?.calendarDockEnabled === 'boolean') {
-      return parsed.state.calendarDockEnabled
-    }
-    if (typeof parsed.calendarDockEnabled === 'boolean') {
-      return parsed.calendarDockEnabled
-    }
-  } catch (e) {
-    console.warn(`${logPrefix} Failed to parse storage value`, e)
-  }
-  return true
-}
-
-async function loadDockEnabledPreference() {
-  try {
-    const storage = await chrome.storage.local.get(CONFIG_STORAGE_KEY)
-    dockEnabled = readDockEnabledFromStorageValue(storage[CONFIG_STORAGE_KEY])
-    console.log(`${logPrefix} Preference loaded`, { dockEnabled })
-  } catch (e) {
-    console.warn(`${logPrefix} Failed to read preference, using default`, e)
-    dockEnabled = true
-  }
-}
 
 function logDockDebug(reason: string, details?: Record<string, unknown>) {
   const detailText = details ? JSON.stringify(details) : ''
@@ -413,14 +384,6 @@ function updateDockPosition(host: HTMLElement, container: HTMLElement) {
 function ensureDockMount() {
   const existingHost = document.getElementById(DOCK_MOUNT_POINT_ID) as HTMLElement | null
 
-  if (!dockEnabled) {
-    if (existingHost) {
-      existingHost.style.display = 'none'
-    }
-    logDockDebug('hidden: disabled by user setting')
-    return
-  }
-
   if (hasOpenEventOverlay()) {
     if (existingHost) {
       existingHost.style.display = 'none'
@@ -538,16 +501,6 @@ const observer = new MutationObserver((mutations) => {
 // console.log('[Calendar Jira Sync] Starting observer')
 observer.observe(document.body, { childList: true, subtree: true })
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local') return
-  const change = changes[CONFIG_STORAGE_KEY]
-  if (!change) return
-
-  dockEnabled = readDockEnabledFromStorageValue(change.newValue)
-  logDockDebug('preference changed', { dockEnabled })
-  ensureDockMount()
-})
-
 function ensureMountOnActiveContainers() {
   const candidates = [
     ...Array.from(document.querySelectorAll('[role="dialog"]')),
@@ -596,6 +549,4 @@ if (existingDialog) {
   }
 }
 
-void loadDockEnabledPreference().finally(() => {
-  ensureDockMount()
-})
+ensureDockMount()

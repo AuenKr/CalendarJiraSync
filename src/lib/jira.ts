@@ -51,6 +51,27 @@ const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise
 
 const TTL = 30 * 60 * 1000; // 30 minutes
 
+const searchIssuesFromApi = async (query: string, linkedTaskId: string | null, linkedTask: Issue[]): Promise<SearchResult> => {
+  const payload: SearchIssuesPayload = { query }
+  const data = await sendToBackground<SearchIssuesResponse>('SEARCH_ISSUES', payload)
+
+  let resolvedLinkedTask = linkedTask
+  let apiIssues = data.issues
+  if (resolvedLinkedTask.length === 0 && linkedTaskId) {
+    const foundInApi = apiIssues.find(i => i.key === linkedTaskId)
+    if (foundInApi) {
+      resolvedLinkedTask = [foundInApi]
+    }
+  }
+
+  // Filter linked task out of API results so we don't show it twice
+  apiIssues = apiIssues.filter(each => each.key !== linkedTaskId)
+  return {
+    source: 'api',
+    issues: [...resolvedLinkedTask, ...apiIssues],
+  }
+}
+
 export const searchIssues = async (query: string, linkedTaskId: string | null, forceApi = false): Promise<SearchResult> => {
   const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
   // GetLinkedTask
@@ -94,33 +115,25 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
         const searchResult = results
           .map(r => r.item)
           .filter(item => item.key !== linkedTaskId)
-        return { source: 'local', issues: [...linkedTask, ...searchResult] }
+        if (searchResult.length > 0) {
+          return { source: 'local', issues: [...linkedTask, ...searchResult] }
+        }
       }
 
-      return { source: 'local', issues: linkedTask }
+      // No local match: automatically fallback to Jira API search.
+      return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
     } catch (e) {
       console.warn('Local search failed', e)
-      return { source: 'local', issues: linkedTask }
+      try {
+        return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
+      } catch (apiError) {
+        console.warn('API search failed after local search failure', apiError)
+        return { source: 'local', issues: linkedTask }
+      }
     }
   }
 
-  // Fallback to API
-  const payload: SearchIssuesPayload = { query }
-  const data = await sendToBackground<SearchIssuesResponse>('SEARCH_ISSUES', payload)
-
-  let apiIssues = data.issues
-  if (linkedTask.length === 0 && linkedTaskId) {
-    const foundInApi = apiIssues.find(i => i.key === linkedTaskId)
-    if (foundInApi) {
-      linkedTask = [foundInApi]
-    }
-  }
-
-  // Filter linked task out of API results so we don't show it twice
-  apiIssues = apiIssues.filter(each => each.key !== linkedTaskId)
-  return {
-    source: 'api', issues: [...linkedTask, ...apiIssues]
-  }
+  return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
 }
 
 export const syncData = async (): Promise<SyncDataResponse> => {

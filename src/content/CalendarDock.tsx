@@ -155,19 +155,19 @@ export default function CalendarDock() {
             </button>
 
             {lastLoggedTimes[selectedDate] && (
-              <p className="text-[10px] text-[#5f6368] dark:text-[#bdc1c6]">
+              <p className="text-center text-[10px] text-[#5f6368] dark:text-[#bdc1c6]">
                 Last logged: {new Date(lastLoggedTimes[selectedDate]).toLocaleTimeString()}
               </p>
             )}
 
             {logResult && (
-              <p className={cn('text-xs', logResult.toLowerCase().includes('failed') || logResult.toLowerCase().includes('please') ? 'text-red-600 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300')}>
+              <p className={cn('text-center text-xs', logResult.toLowerCase().includes('failed') || logResult.toLowerCase().includes('please') ? 'text-red-600 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300')}>
                 {logResult}
               </p>
             )}
 
             {resetResult && (
-              <p className={cn('text-xs', resetResult.toLowerCase().includes('failed') ? 'text-red-600 dark:text-red-300' : 'text-amber-700 dark:text-amber-300')}>
+              <p className={cn('text-center text-xs', resetResult.toLowerCase().includes('failed') ? 'text-red-600 dark:text-red-300' : 'text-amber-700 dark:text-amber-300')}>
                 {resetResult}
               </p>
             )}
