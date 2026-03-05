@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 
 const RELEASE_DIR = 'release'
 const DIST_DIR = 'dist'
 const VERIFY_ONLY = process.argv.includes('--verify')
+const PACKAGE_JSON_PATH = 'package.json'
+const MANIFEST_JSON_PATH = 'manifest.json'
 
 function run(command, options = {}) {
   return execSync(command, {
@@ -100,6 +102,26 @@ function getCommitMessagesSinceTag(tag) {
   }
 }
 
+function readJsonFile(path) {
+  return JSON.parse(readFileSync(path, 'utf-8'))
+}
+
+function updateVersionFiles(version) {
+  const packageJson = readJsonFile(PACKAGE_JSON_PATH)
+  const manifestJson = readJsonFile(MANIFEST_JSON_PATH)
+
+  packageJson.version = version
+  manifestJson.version = version
+
+  writeFileSync(PACKAGE_JSON_PATH, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf-8')
+  writeFileSync(MANIFEST_JSON_PATH, `${JSON.stringify(manifestJson, null, 2)}\n`, 'utf-8')
+}
+
+function commitVersionFiles(version) {
+  run(`git add "${PACKAGE_JSON_PATH}" "${MANIFEST_JSON_PATH}"`)
+  run(`git commit -m "chore: release v${version}"`)
+}
+
 function main() {
   ensurePrerequisites()
 
@@ -128,6 +150,10 @@ function main() {
     console.log('[release] Verify-only mode enabled. Skipping build, tag push, and release publish.')
     return
   }
+
+  updateVersionFiles(version)
+  commitVersionFiles(version)
+  run('git push')
 
   run('bun run build')
 
