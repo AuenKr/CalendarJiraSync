@@ -1,6 +1,6 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Check, ChevronDown, Loader2 } from 'lucide-react'
+import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, type JiraIssue, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
@@ -360,6 +360,24 @@ function stripLinkedIssuePrefix(value: string): string {
   return normalizeLinkedText(value).replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?\s*/, '')
 }
 
+function normalizeJiraDomain(value: string): string {
+  return value
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .split('/')[0]
+    .replace(/\/$/, '')
+}
+
+function getJiraOriginFromIssueSelf(issueSelf?: string): string | null {
+  if (!issueSelf) return null
+  try {
+    return new URL(issueSelf).origin
+  } catch {
+    return null
+  }
+}
+
 type KeySource = 'title-input' | 'heading' | 'data-text' | 'none'
 
 interface LinkedKeyResolution {
@@ -403,6 +421,7 @@ export default function ContentApp({
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
   const [linkedKey, setLinkedKey] = useState<string | null>(null)
   const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
+  const [jiraDomainFallback, setJiraDomainFallback] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
@@ -624,6 +643,47 @@ export default function ContentApp({
   })
 
   const linkedIssueStatus = linkedIssue?.fields.status?.name
+  const jiraBrowseUrl = useMemo(() => {
+    if (!linkedKey) return null
+
+    const issueOrigin = getJiraOriginFromIssueSelf(linkedIssue?.self)
+    if (issueOrigin) {
+      return `${issueOrigin}/browse/${linkedKey}`
+    }
+
+    const normalizedDomain = jiraDomainFallback ? normalizeJiraDomain(jiraDomainFallback) : ''
+    if (!normalizedDomain) return null
+    return `https://${normalizedDomain}/browse/${linkedKey}`
+  }, [jiraDomainFallback, linkedIssue?.self, linkedKey])
+
+  const handleOpenJira = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!jiraBrowseUrl) return
+    window.open(jiraBrowseUrl, '_blank', 'noopener,noreferrer')
+  }, [jiraBrowseUrl])
+
+  useEffect(() => {
+    const loadJiraDomain = async () => {
+      try {
+        const storage = await chrome.storage.local.get('jira-sync-config')
+        const raw = storage['jira-sync-config']
+        if (!raw || typeof raw !== 'string') {
+          setJiraDomainFallback(null)
+          return
+        }
+
+        const parsed = JSON.parse(raw) as { state?: { jiraDomain?: string } }
+        const fallback = parsed?.state?.jiraDomain || null
+        setJiraDomainFallback(fallback)
+      } catch (e) {
+        console.warn(`${logPrefix} Failed to load Jira domain fallback`, e)
+        setJiraDomainFallback(null)
+      }
+    }
+
+    loadJiraDomain()
+  }, [logPrefix])
 
   useEffect(() => {
     console.log(`${logPrefix} State: status visibility snapshot`, {
@@ -862,65 +922,83 @@ export default function ContentApp({
     <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
       {linkedKey && (
         <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
-          <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
-            Jira status:
-          </span>
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                className={cn(
-                  'inline-flex w-fit max-w-[160px] items-center rounded-full font-medium transition-colors border hover:cursor-pointer',
-                  isBubbleView ? 'gap-1 px-2.5 py-1 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-[12px]',
-                  'bg-[#f1f3f4] text-black border-[#dadce0] hover:bg-[#e8eaed]',
-                  'dark:bg-[#3c4043] dark:text-white dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
-                )}
-              >
-                {transitionMutation.isPending ? <Loader2 className={cn('animate-spin', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} /> : null}
-                {!transitionMutation.isPending && (
-                  <span className={cn(isBubbleView ? 'h-1.5 w-1.5' : 'h-2 w-2', 'rounded-full opacity-90', getStatusDotClass(linkedIssueStatus))} />
-                )}
-                <span className="truncate text-black dark:text-white">{linkedIssueStatus || 'Loading...'}</span>
-                <ChevronDown className={cn('opacity-50', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent
-              className={cn(
-                'w-52 p-1.5 rounded-xl border shadow-[0_6px_18px_rgba(0,0,0,0.18)]',
-                'bg-[#ffffff] text-[#3c4043] border-[#dadce0]',
-                'dark:bg-[#333537] dark:text-[#e8eaed] dark:border-[#5f6368]'
-              )}
-              align="end"
-            >
-              <div className="text-[11px] font-medium px-2.5 py-1.5 mb-1 text-[#5f6368] dark:text-[#bdc1c6]">
-                Change Status
-              </div>
-              {transitions?.map((t: JiraTransition) => (
+          <div className="inline-flex items-center gap-2">
+            <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
+              Jira status:
+            </span>
+            <Popover>
+              <PopoverTrigger asChild>
                 <button
-                  key={t.id}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })
-                  }}
                   className={cn(
-                    'w-full text-left px-2.5 py-2 text-[13px] rounded-lg flex items-center justify-between transition-colors',
-                    'hover:bg-[#f1f3f4] text-[#3c4043]',
-                    'dark:hover:bg-[#44474a] dark:text-[#e8eaed]'
+                    'inline-flex w-fit max-w-[160px] items-center rounded-full font-medium transition-colors border hover:cursor-pointer',
+                    isBubbleView ? 'gap-1 px-2.5 py-1 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-[12px]',
+                    'bg-[#f1f3f4] text-black border-[#dadce0] hover:bg-[#e8eaed]',
+                    'dark:bg-[#3c4043] dark:text-white dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
                   )}
                 >
-                  <span className="truncate">{t.name}</span>
-                  {linkedIssueStatus === (t as unknown as { to?: { name: string } }).to?.name && (
-                    <Check className="h-3.5 w-3.5 text-[#1a73e8] dark:text-[#8ab4f8]" />
+                  {transitionMutation.isPending ? <Loader2 className={cn('animate-spin', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} /> : null}
+                  {!transitionMutation.isPending && (
+                    <span className={cn(isBubbleView ? 'h-1.5 w-1.5' : 'h-2 w-2', 'rounded-full opacity-90', getStatusDotClass(linkedIssueStatus))} />
                   )}
+                  <span className="truncate text-black dark:text-white">{linkedIssueStatus || 'Loading...'}</span>
+                  <ChevronDown className={cn('opacity-50', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} />
                 </button>
-              ))}
-              {(!transitions || transitions.length === 0) && (
-                <div className="px-2.5 py-2 text-xs text-[#5f6368] dark:text-[#bdc1c6]">
-                  No transitions available
+              </PopoverTrigger>
+              <PopoverContent
+                className={cn(
+                  'w-52 p-1.5 rounded-xl border shadow-[0_6px_18px_rgba(0,0,0,0.18)]',
+                  'bg-[#ffffff] text-[#3c4043] border-[#dadce0]',
+                  'dark:bg-[#333537] dark:text-[#e8eaed] dark:border-[#5f6368]'
+                )}
+                align="end"
+              >
+                <div className="text-[11px] font-medium px-2.5 py-1.5 mb-1 text-[#5f6368] dark:text-[#bdc1c6]">
+                  Change Status
                 </div>
+                {transitions?.map((t: JiraTransition) => (
+                  <button
+                    key={t.id}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })
+                    }}
+                    className={cn(
+                      'w-full text-left px-2.5 py-2 text-[13px] rounded-lg flex items-center justify-between transition-colors',
+                      'hover:bg-[#f1f3f4] text-[#3c4043]',
+                      'dark:hover:bg-[#44474a] dark:text-[#e8eaed]'
+                    )}
+                  >
+                    <span className="truncate">{t.name}</span>
+                    {linkedIssueStatus === (t as unknown as { to?: { name: string } }).to?.name && (
+                      <Check className="h-3.5 w-3.5 text-[#1a73e8] dark:text-[#8ab4f8]" />
+                    )}
+                  </button>
+                ))}
+                {(!transitions || transitions.length === 0) && (
+                  <div className="px-2.5 py-2 text-xs text-[#5f6368] dark:text-[#bdc1c6]">
+                    No transitions available
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+          </div>
+          {jiraBrowseUrl && (
+            <button
+              type="button"
+              onClick={handleOpenJira}
+              aria-label="Open in Jira"
+              title="Open in Jira"
+              className={cn(
+                'inline-flex items-center justify-center rounded-full border transition-colors hover:cursor-pointer',
+                isBubbleView ? 'h-6 w-6' : 'h-7 w-7',
+                'bg-[#f1f3f4] text-[#3c4043] border-[#dadce0] hover:bg-[#e8eaed]',
+                'dark:bg-[#3c4043] dark:text-[#e8eaed] dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
               )}
-            </PopoverContent>
-          </Popover>
+            >
+              <ExternalLink className={cn(isBubbleView ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
+            </button>
+          )}
         </div>
       )}
 

@@ -4,7 +4,12 @@
 
 1. [] Support multiple jira domains
    Some people work on multiple different jira domain eg: `appointy.atlassian.net` and `mathnasium.atlassian.net` and they want to sync from all domain task.
-   Add a extra field in the setup page to add multiple jira domain.
+   Add a extra field(plus btn to add more jira domains) in the setup page to add multiple jira domain.
+   This will change a lot of things in the code.
+   - Syncing the task from all domain
+   - matching task and domain properly
+   - where ever the jira task is added you have to add domain thing also(to link task + domain) find it.
+   - Make a good working solution which is architecture good not just some hotfix.
 
 2. [DONE] When user install the extension, he should be redirected to setup page automatically.
    Currently, user need to click on the extension icon and click on setup button.
@@ -12,7 +17,7 @@
 3. [DONE] Change the setup page design, extension pop up ui it looks like ai slop. Use frontend skills
    Update the favicon icon also in setup page
 
-4. [] The user should able to open the jira task in jira board directly from the calendar(calendar will redirect the user to jira board)
+4. [Done] The user should able to open the jira task in jira board directly from the calendar(calendar will redirect the user to jira board)
    Add a redirect link to the event pop up box.
    Add it next to Jira status btn
    Format:
