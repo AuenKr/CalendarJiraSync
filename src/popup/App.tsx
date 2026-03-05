@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
 import { syncData, getProjects, type JiraProject } from '../lib/jira'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search } from 'lucide-react'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Sparkles } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
@@ -21,21 +21,18 @@ function App() {
     queryKey: ['projects'],
     queryFn: getProjects,
     enabled: configured,
-    staleTime: 1000 * 60 * 60, // 1 hour
+    staleTime: 1000 * 60 * 60,
     initialData: storedProjects.length > 0 ? storedProjects : undefined,
   })
 
-  // Sync React Query data to Zustand store
   useEffect(() => {
     if (projects.length > 0) {
       setProjects(projects)
     }
   }, [projects, setProjects])
 
-  // Filter projects using Fuse.js
   const filteredProjects = useMemo(() => {
     if (!searchQuery) {
-      // Sort: Selected first, then alphabetical
       return [...projects].sort((a, b) => {
         const aSelected = (selectedProjectKeys || []).includes(a.key)
         const bSelected = (selectedProjectKeys || []).includes(b.key)
@@ -54,9 +51,6 @@ function App() {
 
   const syncMutation = useMutation({
     mutationFn: syncData,
-    onSuccess: () => {
-      // Invalidate queries if needed, though sync updates local storage mostly
-    }
   })
 
   const openSetup = () => {
@@ -68,110 +62,134 @@ function App() {
   }
 
   return (
-    <div className="w-80 bg-gray-900 text-white p-4 max-h-[500px] overflow-y-auto">
-      <header className="flex justify-between items-center mb-4">
-        <h1 className="text-lg font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-          Calendar Jira Sync
-        </h1>
-        <button 
-          onClick={openSetup}
-          className="p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white"
-        >
-          <Settings size={18} />
-        </button>
-      </header>
+    <div className="relative w-[22rem] overflow-hidden bg-[#f3efe8] p-4 text-[#1a2436]">
+      <div className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-[#d7e4f8] blur-2xl" />
+      <div className="pointer-events-none absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-[#f7d7c1] blur-2xl" />
 
-      <div className="flex flex-col items-center justify-center space-y-4">
+      <div className="relative space-y-4">
+        <header className="flex items-start justify-between rounded-2xl border border-[#d6cec1] bg-[#faf7f1] p-3 shadow-[0_14px_30px_-26px_rgba(20,27,39,0.8)]">
+          <div>
+            <p className="mb-1 inline-flex items-center gap-1 rounded-full border border-[#d8cfc2] bg-[#f1ebe2] px-2 py-0.5 text-[10px] font-semibold tracking-[0.12em] text-[#536078] uppercase">
+              <Sparkles size={11} />
+              Live sync
+            </p>
+            <h1 className="text-base leading-tight [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',serif]">
+              Calendar Jira Sync
+            </h1>
+          </div>
+          <button
+            onClick={openSetup}
+            className="rounded-full border border-[#d2c9bc] bg-white p-2 text-[#5f6778] transition hover:border-[#b0a590] hover:text-[#1d5d8c]"
+            title="Open setup"
+          >
+            <Settings size={16} />
+          </button>
+        </header>
+
         {configured ? (
-          <>
-            <div className="w-full bg-gray-800 rounded-lg p-4 border border-gray-700">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-                  <Layout size={16} /> Select Projects to Sync
+          <div className="space-y-3">
+            <section className="rounded-2xl border border-[#d6cec1] bg-white/90 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-[#4f5b73] uppercase">
+                  <Layout size={14} />
+                  Projects to sync
                 </h2>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">{filteredProjects.length} found</span>
-                  <button 
-                    onClick={() => refetchProjects()} 
-                    className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"
-                    title="Refresh Projects"
+                  <span className="rounded-full bg-[#f1ebe2] px-2 py-0.5 text-[10px] font-semibold text-[#5a6578]">
+                    {filteredProjects.length} shown
+                  </span>
+                  <button
+                    onClick={() => refetchProjects()}
+                    className="rounded-full border border-[#d6cec1] bg-[#faf7f1] p-1 text-[#5d6677] transition hover:border-[#b8ad98] hover:text-[#1d5d8c]"
+                    title="Refresh projects"
                   >
-                    <RefreshCw size={12} className={fetchingProjects ? "animate-spin" : ""} />
+                    <RefreshCw size={12} className={fetchingProjects ? 'animate-spin' : ''} />
                   </button>
                 </div>
               </div>
 
-              <div className="mb-2 relative">
-                <Search size={14} className="absolute left-2 top-2.5 text-gray-500" />
-                <Input 
-                  type="text" 
-                  placeholder="Search projects..." 
+              <div className="relative mb-2">
+                <Search size={14} className="absolute top-2.5 left-2 text-[#78839b]" />
+                <Input
+                  type="text"
+                  placeholder="Search projects"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 pl-8 bg-gray-900/50 border-gray-700 text-xs"
+                  className="h-8 border-[#d7cebf] bg-[#faf7f1] pl-8 text-xs placeholder:text-[#8b91a0]"
                 />
               </div>
-              
+
               {fetchingProjects && projects.length === 0 ? (
-                <div className="text-center py-4 text-gray-500 text-xs">Loading projects...</div>
+                <div className="py-5 text-center text-xs text-[#677086]">Loading projects...</div>
               ) : filteredProjects.length > 0 ? (
-                <div className="space-y-2 max-h-24 overflow-y-auto pr-1 custom-scrollbar">
+                <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
                   {filteredProjects.map((project: JiraProject) => {
                     const isSelected = (selectedProjectKeys || []).includes(project.key)
+
                     return (
-                      <button 
-                        key={project.id} 
+                      <button
+                        key={project.id}
                         onClick={() => toggleProject(project.key)}
-                        className={`w-full text-xs p-2 rounded border flex justify-between items-center transition-colors ${
-                          isSelected 
-                            ? 'bg-blue-900/30 border-blue-500/50 text-blue-100' 
-                            : 'bg-gray-700/50 border-gray-700 text-gray-300 hover:bg-gray-700'
+                        className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
+                          isSelected
+                            ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47]'
+                            : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf]'
                         }`}
                       >
-                        <span className="truncate flex-1 text-left">{project.name}</span>
+                        <span className="truncate text-left font-medium">{project.name}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">{project.key}</span>
-                          {isSelected ? <CheckSquare size={14} className="text-blue-400" /> : <Square size={14} className="text-gray-500" />}
+                          <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378]">{project.key}</span>
+                          {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c]" /> : <Square size={14} className="text-[#7b859a]" />}
                         </div>
                       </button>
                     )
                   })}
                 </div>
               ) : (
-                <div className="text-center py-4 text-gray-500 text-xs">No projects found</div>
+                <div className="rounded-xl border border-dashed border-[#d6cec1] bg-[#f7f2ea] py-5 text-center text-xs text-[#677086]">
+                  No projects found
+                </div>
               )}
-            </div>
+            </section>
 
-            <div className="w-full">
+            <section className="rounded-2xl border border-[#d6cec1] bg-white/90 p-3">
               <button
                 onClick={() => syncMutation.mutate()}
                 disabled={syncMutation.isPending}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5d8c] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#174e74] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw size={16} className={syncMutation.isPending ? "animate-spin" : ""} />
-                {syncMutation.isPending ? 'Syncing Tasks...' : 'Sync Tasks Now'}
+                <RefreshCw size={15} className={syncMutation.isPending ? 'animate-spin' : ''} />
+                {syncMutation.isPending ? 'Syncing tasks...' : 'Run sync now'}
               </button>
-              {syncMutation.isSuccess && <p className="text-xs text-center mt-2 text-green-400">Synced {syncMutation.data?.count} tasks!</p>}
-              {syncMutation.isError && <p className="text-xs text-center mt-2 text-red-400">Sync failed</p>}
-            </div>
-          </>
+              {syncMutation.isSuccess && (
+                <p className="mt-2 rounded-lg border border-[#b9d9c3] bg-[#effaf2] px-2 py-1.5 text-center text-xs text-[#25623d]">
+                  Synced {syncMutation.data?.count} tasks
+                </p>
+              )}
+              {syncMutation.isError && (
+                <p className="mt-2 rounded-lg border border-[#e4bbb2] bg-[#fff0ee] px-2 py-1.5 text-center text-xs text-[#9e2f24]">
+                  Sync failed. Try again.
+                </p>
+              )}
+            </section>
+          </div>
         ) : (
-          <>
-            <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center text-yellow-500">
+          <section className="rounded-2xl border border-[#d6cec1] bg-white/95 p-4 text-center">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#fff4df] text-[#ab6c12]">
               <AlertCircle size={32} />
             </div>
-            <p className="text-center text-gray-300">
-              Please configure the extension to start syncing.
+            <h2 className="mb-1 text-sm font-semibold text-[#253147]">Setup required</h2>
+            <p className="text-xs leading-5 text-[#657188]">
+              Connect your Jira workspace once, then run quick syncs here whenever you need fresh tasks.
             </p>
             <button
               onClick={openSetup}
-              className="mt-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+              className="mt-3 rounded-xl bg-[#1d5d8c] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#174e74]"
             >
-              Open Settings
+              Open setup
             </button>
-          </>
+          </section>
         )}
-
       </div>
     </div>
   )

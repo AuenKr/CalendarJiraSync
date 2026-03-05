@@ -1,23 +1,18 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="96" fill="#0F172A"/>
+  <rect width="512" height="512" rx="96" fill="#F3EFE8"/>
 
-  <!-- Calendar base -->
-  <rect x="96" y="120" width="320" height="256" rx="32" fill="#E5E7EB"/>
-  <rect x="96" y="120" width="320" height="64" rx="32" fill="#38BDF8"/>
+  <rect x="92" y="108" width="328" height="296" rx="44" fill="#FAF7F1" stroke="#D7CEBF" stroke-width="14"/>
+  <rect x="92" y="108" width="328" height="88" rx="44" fill="#1D5D8C"/>
+  <rect x="150" y="72" width="34" height="84" rx="17" fill="#1D5D8C"/>
+  <rect x="328" y="72" width="34" height="84" rx="17" fill="#1D5D8C"/>
 
-  <!-- Calendar rings -->
-  <rect x="160" y="80" width="32" height="80" rx="16" fill="#38BDF8"/>
-  <rect x="320" y="80" width="32" height="80" rx="16" fill="#38BDF8"/>
+  <rect x="142" y="238" width="90" height="56" rx="14" fill="#1D5D8C"/>
+  <rect x="280" y="238" width="90" height="56" rx="14" fill="#A9542A"/>
+  <rect x="212" y="316" width="90" height="56" rx="14" fill="#2D8B5A"/>
 
-  <!-- Jira style blocks -->
-  <rect x="152" y="216" width="88" height="56" rx="12" fill="#2563EB"/>
-  <rect x="272" y="216" width="88" height="56" rx="12" fill="#0EA5E9"/>
-  <rect x="212" y="296" width="88" height="56" rx="12" fill="#22D3EE"/>
+  <path d="M176 318C147 318 124 341 124 370" stroke="#7A3214" stroke-width="14" stroke-linecap="round"/>
+  <path d="M124 370L111 356M124 370L138 356" stroke="#7A3214" stroke-width="14" stroke-linecap="round"/>
 
-  <!-- Sync arrows -->
-  <path d="M188 360C156 360 132 336 132 304" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
-  <path d="M132 304L116 320M132 304L148 320" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
-
-  <path d="M324 248C356 248 380 272 380 304" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
-  <path d="M380 304L364 288M380 304L396 288" stroke="#0F172A" stroke-width="16" stroke-linecap="round"/>
+  <path d="M334 292C363 292 386 315 386 344" stroke="#7A3214" stroke-width="14" stroke-linecap="round"/>
+  <path d="M386 344L373 330M386 344L400 330" stroke="#7A3214" stroke-width="14" stroke-linecap="round"/>
 </svg>
