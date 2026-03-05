@@ -1,8 +1,8 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Check, ChevronDown, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { searchIssues, getIssue, getTransitions, transitionIssue, type JiraIssue, type JiraTransition } from '../lib/jira'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, type JiraIssue, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
 
 // Debounce hook
@@ -291,17 +291,17 @@ function getStatusPriority(statusName?: string): number {
   return STATUS_PRIORITY[statusName] || 99
 }
 
-function getStatusToneClass(statusName?: string): string {
+function getStatusDotClass(statusName?: string): string {
   if (statusName === 'Done') {
-    return 'text-emerald-300'
+    return 'bg-emerald-500'
   }
   if (statusName === 'In Progress') {
-    return 'text-sky-300'
+    return 'bg-sky-500'
   }
   if (statusName === 'To Do') {
-    return 'text-amber-300'
+    return 'bg-amber-500'
   }
-  return 'text-muted-foreground'
+  return 'bg-muted-foreground'
 }
 
 const LINKED_ISSUE_PATTERN = /\[?([A-Z][A-Z0-9]+-\d+)\]?/
@@ -682,8 +682,15 @@ export default function ContentApp({
   const { data, isLoading: loading } = useQuery({
     queryKey: ['issues', debouncedQuery, linkedKey, forceApi],
     queryFn: () => searchIssues(debouncedQuery, linkedKey, forceApi),
-    enabled: debouncedQuery.length >= 2,
+    enabled: isFocused && debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
+  })
+
+  const { data: storedIssuesData } = useQuery({
+    queryKey: ['stored-issues'],
+    queryFn: getStoredIssues,
+    enabled: isFocused,
+    staleTime: 1000 * 60 * 1,
   })
 
   // Process results: Sort by status and ensure linked issue is present
@@ -694,6 +701,21 @@ export default function ContentApp({
   })
 
   const source = data?.source
+  const isSuggestionMode = debouncedQuery.length < 2
+
+  const suggestedIssues = useMemo(() => {
+    const issues = storedIssuesData?.issues || []
+    return [...issues]
+      .filter(issue => issue.key !== linkedKey)
+      .sort((a, b) => {
+        const pA = getStatusPriority(a.fields.status?.name)
+        const pB = getStatusPriority(b.fields.status?.name)
+        if (pA !== pB) return pA - pB
+        return a.key.localeCompare(b.key)
+      })
+  }, [storedIssuesData?.issues, linkedKey])
+
+  const visibleIssues = isSuggestionMode ? suggestedIssues : results
 
   // Listen to input changes for search
   useEffect(() => {
@@ -754,13 +776,13 @@ export default function ContentApp({
       }
     }
 
-    if (debouncedQuery.length < 2) {
+    if (!isFocused) {
       updateOpen(false)
       return
     }
 
-    if (!isFocused) {
-      updateOpen(false)
+    if (isSuggestionMode) {
+      updateOpen(true)
       return
     }
 
@@ -780,7 +802,7 @@ export default function ContentApp({
     else if (source === 'api' && results.length === 0) {
       updateOpen(true)
     }
-  }, [debouncedQuery, results.length, loading, source, open, isFocused])
+  }, [isSuggestionMode, results.length, loading, source, open, isFocused])
 
   const handleSelect = async (issue: JiraIssue) => {
     console.log(`${logPrefix} Step: user selected issue`, { key: issue.key })
@@ -840,7 +862,7 @@ export default function ContentApp({
     <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
       {linkedKey && (
         <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
-          <span className={cn('leading-none text-muted-foreground whitespace-nowrap text-md')}>
+          <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
             Jira status:
           </span>
           <Popover>
@@ -849,15 +871,15 @@ export default function ContentApp({
                 className={cn(
                   'inline-flex w-fit max-w-[160px] items-center rounded-full font-medium transition-colors border hover:cursor-pointer',
                   isBubbleView ? 'gap-1 px-2.5 py-1 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-[12px]',
-                  'bg-[#f1f3f4] text-[#3c4043] border-[#dadce0] hover:bg-[#e8eaed]',
-                  'dark:bg-[#3c4043] dark:text-[#e8eaed] dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
+                  'bg-[#f1f3f4] text-black border-[#dadce0] hover:bg-[#e8eaed]',
+                  'dark:bg-[#3c4043] dark:text-white dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
                 )}
               >
                 {transitionMutation.isPending ? <Loader2 className={cn('animate-spin', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} /> : null}
                 {!transitionMutation.isPending && (
-                  <span className={cn(isBubbleView ? 'h-1.5 w-1.5' : 'h-2 w-2', 'rounded-full bg-current opacity-90', getStatusToneClass(linkedIssueStatus))} />
+                  <span className={cn(isBubbleView ? 'h-1.5 w-1.5' : 'h-2 w-2', 'rounded-full opacity-90', getStatusDotClass(linkedIssueStatus))} />
                 )}
-                <span className={cn('truncate', getStatusToneClass(linkedIssueStatus))}>{linkedIssueStatus || 'Loading...'}</span>
+                <span className="truncate text-black dark:text-white">{linkedIssueStatus || 'Loading...'}</span>
                 <ChevronDown className={cn('opacity-50', isBubbleView ? 'h-2.5 w-2.5' : 'h-3 w-3')} />
               </button>
             </PopoverTrigger>
@@ -923,17 +945,29 @@ export default function ContentApp({
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="max-h-60 overflow-y-auto">
+            {isSuggestionMode && visibleIssues.length > 0 && (
+              <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground border-b border-border">
+                Suggested Jira tasks
+              </div>
+            )}
+
             {loading && <div className="p-2 text-xs text-muted-foreground text-center">Searching...</div>}
 
-            {!loading && results.length === 0 && source === 'local' && (
+            {!loading && !isSuggestionMode && results.length === 0 && source === 'local' && (
               <div className="p-2 text-xs text-muted-foreground text-center">No local issues found</div>
             )}
 
-            {!loading && results.length === 0 && source === 'api' && (
+            {!loading && !isSuggestionMode && results.length === 0 && source === 'api' && (
               <div className="p-2 text-xs text-muted-foreground text-center">No issues found in Jira</div>
             )}
 
-            {results.map(issue => (
+            {!loading && isSuggestionMode && visibleIssues.length === 0 && (
+              <div className="p-2 text-xs text-muted-foreground text-center">
+                No synced Jira tasks yet. Run sync from the extension popup.
+              </div>
+            )}
+
+            {visibleIssues.map(issue => (
               <button
                 key={issue.id}
                 onClick={() => void handleSelect(issue)}
@@ -957,7 +991,7 @@ export default function ContentApp({
             ))}
 
             {/* Show "Search in Jira" ONLY if we haven't searched API yet (source is local) */}
-            {debouncedQuery.length >= 2 && !loading && source === 'local' && results.length > 0 && (
+            {!isSuggestionMode && debouncedQuery.length >= 2 && !loading && source === 'local' && results.length > 0 && (
               <button
                 onClick={() => setForceApi(true)}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm text-primary flex items-center gap-2 transition-colors border-t border-border"

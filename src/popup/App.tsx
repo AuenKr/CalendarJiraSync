@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, type JiraProject } from '../lib/jira'
+import { syncData, getProjects, getStoredIssues, type JiraProject } from '../lib/jira'
 import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Sparkles } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
@@ -23,6 +23,13 @@ function App() {
     enabled: configured,
     staleTime: 1000 * 60 * 60,
     initialData: storedProjects.length > 0 ? storedProjects : undefined,
+  })
+
+  const { data: storedIssuesData, refetch: refetchStoredIssues } = useQuery({
+    queryKey: ['stored-issues-meta'],
+    queryFn: getStoredIssues,
+    enabled: configured,
+    staleTime: 1000 * 60,
   })
 
   useEffect(() => {
@@ -51,6 +58,9 @@ function App() {
 
   const syncMutation = useMutation({
     mutationFn: syncData,
+    onSuccess: () => {
+      void refetchStoredIssues()
+    },
   })
 
   const openSetup = () => {
@@ -156,11 +166,14 @@ function App() {
               <button
                 onClick={() => syncMutation.mutate()}
                 disabled={syncMutation.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5d8c] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#174e74] dark:bg-[#2a6f9f] dark:hover:bg-[#357fb4] disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5d8c] px-4 py-2.5 text-sm font-semibold text-white transition hover:cursor-pointer hover:bg-[#174e74] dark:bg-[#2a6f9f] dark:hover:bg-[#357fb4] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={15} className={syncMutation.isPending ? 'animate-spin' : ''} />
                 {syncMutation.isPending ? 'Syncing tasks...' : 'Run sync now'}
               </button>
+              <p className="mt-2 text-center text-[10px] text-[#677086] dark:text-[#90a0b7]">
+                Last task sync: {storedIssuesData?.lastSync ? new Date(storedIssuesData.lastSync).toLocaleString() : 'Never'}
+              </p>
               {syncMutation.isSuccess && (
                 <p className="mt-2 rounded-lg border border-[#b9d9c3] bg-[#effaf2] px-2 py-1.5 text-center text-xs text-[#25623d] dark:border-[#2e5740] dark:bg-[#1d3127] dark:text-[#9dd2ad]">
                   Synced {syncMutation.data?.count} tasks

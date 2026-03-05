@@ -8,8 +8,9 @@ import { useConfigStore } from '@/store/useConfigStore'
 import { logTimeForDateInPage, resetWorklogsForDate } from '@/lib/timeLogging'
 
 export default function CalendarDock() {
+  const todayDate = getLocalDateString(new Date())
   const [open, setOpen] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateString(new Date()))
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayDate)
   const [loggingTime, setLoggingTime] = useState(false)
   const [resettingWorklogs, setResettingWorklogs] = useState(false)
   const [logResult, setLogResult] = useState('')
@@ -17,13 +18,6 @@ export default function CalendarDock() {
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const { lastLoggedTimes, setLastLoggedTime, clearLastLoggedTime } = useConfigStore()
-
-  useEffect(() => {
-    console.log('[Jira Sync][Content][Dock] CalendarDock component mounted')
-    return () => {
-      console.log('[Jira Sync][Content][Dock] CalendarDock component unmounted')
-    }
-  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -117,23 +111,30 @@ export default function CalendarDock() {
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="text-xs text-[#5f6368] dark:text-[#bdc1c6]">Date</span>
-              <Input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className={cn(
-                  'h-9 flex-1 border text-sm [color-scheme:light]',
-                  'bg-[#ffffff] border-[#dadce0] text-[#3c4043]',
-                  'dark:bg-[#202124] dark:border-[#5f6368] dark:text-[#e8eaed] dark:[color-scheme:dark]'
-                )}
-              />
+              <div className="relative flex-1">
+                <Input
+                  id="jira-sync-log-date"
+                  name="jira-sync-log-date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  max={todayDate}
+                  className={cn(
+                    'jira-sync-date-input relative h-9 w-full border-2 pl-10 pr-3 text-sm font-medium [color-scheme:light] cursor-pointer hover:cursor-pointer',
+                    'bg-[#f8f9fa] border-[#dadce0] text-[#3c4043] focus-visible:ring-[#9aa0a6]/30',
+                    'dark:bg-[#3c4043] dark:border-[#5f6368] dark:text-[#e8eaed] dark:[color-scheme:dark] dark:focus-visible:ring-[#9aa0a6]/30'
+                  )}
+                />
+                <CalendarDays className="pointer-events-none absolute left-3.5 top-[28%] h-4 w-4 -translate-y-1/2 text-[#5f6368] dark:text-[#bdc1c6]" />
+              </div>
             </div>
 
             <button
               onClick={() => void handleLogTime()}
               disabled={loggingTime || resettingWorklogs}
+              title="Logs Jira work time from completed Jira-linked events for the selected date."
               className={cn(
-                'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',
                 'bg-[#1a73e8] border-[#1a73e8] text-white hover:bg-[#1765cc]'
               )}
             >
@@ -144,8 +145,9 @@ export default function CalendarDock() {
             <button
               onClick={() => void handleResetWorklogs()}
               disabled={resettingWorklogs || loggingTime}
+              title="Deletes extension-created Jira worklogs for the selected date."
               className={cn(
-                'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',
                 'bg-[#f8f9fa] border-[#dadce0] text-[#3c4043] hover:bg-[#f1f3f4]',
                 'dark:bg-[#3c4043] dark:border-[#5f6368] dark:text-[#e8eaed] dark:hover:bg-[#44474a]'
               )}

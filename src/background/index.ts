@@ -431,3 +431,11 @@ chrome.runtime.onMessage.addListener((req, _, sendResponse) => {
 
   return true
 })
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason !== "install") return
+
+  chrome.runtime.openOptionsPage().catch((e) => {
+    console.error("[Jira Sync] Failed to open setup page on install", e)
+  })
+})

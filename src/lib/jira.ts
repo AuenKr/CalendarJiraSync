@@ -34,6 +34,11 @@ export interface SearchResult {
   issues: JiraIssue[]
 }
 
+export interface StoredIssuesResult {
+  issues: JiraIssue[]
+  lastSync?: string
+}
+
 // Helper to send message to background script
 const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise<T> => {
   return new Promise((resolve, reject) => {
@@ -138,6 +143,14 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
 
 export const syncData = async (): Promise<SyncDataResponse> => {
   return await sendToBackground<SyncDataResponse>('SYNC_DATA', {})
+}
+
+export const getStoredIssues = async (): Promise<StoredIssuesResult> => {
+  const data = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
+  return {
+    issues: data.issues || [],
+    lastSync: data.last_sync,
+  }
 }
 
 export const addWorklog = async (issueKey: string, timeSpentSeconds: number, started: string, comment?: string): Promise<JiraWorklog> => {
