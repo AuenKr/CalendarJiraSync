@@ -2,7 +2,7 @@
 
 ## Features
 
-1. [In Progress] Support multiple jira domains/instance.
+1. [DONE] Support multiple jira domains/instance.
    Some people work on multiple different jira domain eg: `appointy.atlassian.net` and `mathnasium.atlassian.net` and they want to sync from all domain task.
    Since same account is connected to multiple jira instance, the same api token will work on all jira instance for that account.
    Add a extra field(plus btn to add more jira domains) in the setup page to add multiple jira domain.

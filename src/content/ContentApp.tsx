@@ -578,8 +578,6 @@ export default function ContentApp({
   const suggestionAnchorStableSinceRef = useRef<number>(0)
   const suggestionAnchorFirstSeenAtRef = useRef<number>(0)
   const suggestionAnchorForcedSettledRef = useRef(false)
-  const fullEditAnchorLogKeyRef = useRef('')
-  const fullEditPopoverLogKeyRef = useRef('')
   const hasMultipleDomains = configuredDomains.length > 1
 
   useEffect(() => {
@@ -616,15 +614,7 @@ export default function ContentApp({
 
     if (isStableEnough || forceAfterMaxWait) {
       setIsSuggestionAnchorSettled(true)
-      if (forceAfterMaxWait && !suggestionAnchorForcedSettledRef.current && isFullEditLayout()) {
-        suggestionAnchorForcedSettledRef.current = true
-        console.log(`${logPrefix} [FullEditAnchor] settle-forced`, {
-          waitMs: now - suggestionAnchorFirstSeenAtRef.current,
-          stableForMs: suggestionAnchorStableSinceRef.current > 0
-            ? now - suggestionAnchorStableSinceRef.current
-            : 0,
-        })
-      }
+      suggestionAnchorForcedSettledRef.current = forceAfterMaxWait && isFullEditLayout()
     } else {
       suggestionAnchorForcedSettledRef.current = false
     }
@@ -634,14 +624,6 @@ export default function ContentApp({
       return sameSuggestionAnchorRect(previous, stabilized) ? previous : stabilized
     })
   }, [])
-
-  const logFullEditAnchor = useCallback((reason: string, details: Record<string, unknown>) => {
-    if (!isFullEditLayout()) return
-    const key = `${reason}|${JSON.stringify(details)}`
-    if (key === fullEditAnchorLogKeyRef.current) return
-    fullEditAnchorLogKeyRef.current = key
-    console.log(`${logPrefix} [FullEditAnchor] ${reason}`, details)
-  }, [logPrefix])
 
   const resolveLinkedIssueRef = useCallback((): LinkedRefResolution => {
     const root = container || document
@@ -704,17 +686,6 @@ export default function ContentApp({
     }
   }, [configuredDomains, container, titleEl, titleInput])
 
-  useEffect(() => {
-    console.log(`${logPrefix} Lifecycle: mounted`, {
-      hasInitialTitleInput: !!initialInput,
-      hasInitialTitleElement: !!titleElement,
-      hasContainer: !!container,
-    })
-    return () => {
-      console.log(`${logPrefix} Lifecycle: unmounted`)
-    }
-  }, [container, initialInput, titleElement])
-
   // Update titleEl if prop changes
   useEffect(() => {
     setTitleEl(titleElement)
@@ -736,7 +707,6 @@ export default function ContentApp({
       const newEl = findTitleElement(root)
       if (!newEl) return
       if (newEl !== titleEl) {
-        console.log(`${logPrefix} Step: resolved visible title element from DOM`)
         setTitleEl(newEl)
       }
     }
@@ -765,7 +735,6 @@ export default function ContentApp({
       if (isLikelyTitleInput(document.activeElement)) {
         const active = document.activeElement
         if (active !== titleInput) {
-          console.log(`${logPrefix} Step: detected active title input`)
           setTitleInput(active)
           return
         }
@@ -774,7 +743,6 @@ export default function ContentApp({
       const input = findVisibleTitleInput(root)
 
       if (input && input !== titleInput) {
-        console.log(`${logPrefix} Step: resolved visible title input from DOM`)
         setTitleInput(input)
       } else if (!input && titleInput && (!titleInput.isConnected || !isElementVisible(titleInput))) {
         setTitleInput(undefined)
@@ -788,7 +756,6 @@ export default function ContentApp({
       const target = e.target as HTMLElement
       if (isLikelyTitleInput(target)) {
         if (target !== titleInput) {
-          console.log(`${logPrefix} Step: title input focus listener detected new input`)
           setTitleInput(target)
         }
       }
@@ -829,15 +796,6 @@ export default function ContentApp({
           }
         }
 
-        if (!issueRefEquals(prev, next)) {
-          console.log(`${logPrefix} Step: linked issue changed`, {
-            previous: prev,
-            next,
-            source: resolution.source,
-            reason: resolution.reason,
-            emptyResolutions: emptyResolutionCountRef.current,
-          })
-        }
         return next
       })
 
@@ -888,7 +846,6 @@ export default function ContentApp({
     }
   }, [container, logPrefix, resolveLinkedIssueRef, titleEl, titleInput])
 
-  const linkedKey = linkedIssueRef?.issueKey || linkedIssueHintKey
   const linkedRefLabel = linkedIssueRef
     ? formatIssueRefLabel(linkedIssueRef, configuredDomains.length)
     : linkedIssueHintKey
@@ -950,22 +907,11 @@ export default function ContentApp({
 
     if (activeTitleInput && activeTitleInput !== titleInput) {
       setTitleInput(activeTitleInput)
-      if (fullEdit) {
-        logFullEditAnchor('input-rebound', {
-          activeElement: document.activeElement?.tagName?.toLowerCase() || 'none',
-        })
-      }
     }
 
     const titleFocused = !!activeTitleInput && document.activeElement === activeTitleInput
     if (titleFocused !== isFocused) {
       setIsFocused(titleFocused)
-      if (fullEdit) {
-        logFullEditAnchor('focus-sync', {
-          titleFocused,
-          activeElement: document.activeElement?.tagName?.toLowerCase() || 'none',
-        })
-      }
     }
 
     if (panelRect) {
@@ -1003,60 +949,12 @@ export default function ContentApp({
         side,
         panelWidth,
       }
-      if (fullEdit) {
-        const anchorRect = anchorElement?.getBoundingClientRect() || null
-        logFullEditAnchor('anchor-resolved', {
-          hasTitleInput: !!activeTitleInput,
-          hasTitleElement: !!activeTitleElement,
-          anchorRect: anchorRect
-            ? {
-              left: Math.round(anchorRect.left),
-              top: Math.round(anchorRect.top),
-              width: Math.round(anchorRect.width),
-              height: Math.round(anchorRect.height),
-            }
-            : null,
-          panelRect: {
-            left: Math.round(panelRect.left),
-            top: Math.round(panelRect.top),
-            width: Math.round(panelRect.width),
-            height: Math.round(panelRect.height),
-          },
-          computed: nextAnchorRect,
-          settled: isSuggestionAnchorSettled,
-        })
-      }
       commitSuggestionAnchorRect(nextAnchorRect)
       return
     }
 
-    if (fullEdit) {
-      const anchorRect = anchorElement?.getBoundingClientRect() || null
-      const containerRect = container?.getBoundingClientRect() || null
-      logFullEditAnchor('panel-unresolved', {
-        hasTitleInput: !!activeTitleInput,
-        hasTitleElement: !!activeTitleElement,
-        anchorRect: anchorRect
-          ? {
-            left: Math.round(anchorRect.left),
-            top: Math.round(anchorRect.top),
-            width: Math.round(anchorRect.width),
-            height: Math.round(anchorRect.height),
-          }
-          : null,
-        containerRect: containerRect
-          ? {
-            left: Math.round(containerRect.left),
-            top: Math.round(containerRect.top),
-            width: Math.round(containerRect.width),
-            height: Math.round(containerRect.height),
-          }
-          : null,
-      })
-    }
-
     commitSuggestionAnchorRect(null)
-  }, [commitSuggestionAnchorRect, container, isFocused, isSuggestionAnchorSettled, logFullEditAnchor, titleEl, titleInput])
+  }, [commitSuggestionAnchorRect, container, isFocused, titleEl, titleInput])
 
   useEffect(() => {
     let frameId = 0
@@ -1086,42 +984,6 @@ export default function ContentApp({
       window.removeEventListener('scroll', scheduleAnchorUpdate, true)
     }
   }, [isFocused, isSuggestionAnchorSettled, open, updateSuggestionAnchorRect])
-
-  useEffect(() => {
-    console.log(`${logPrefix} State: status visibility snapshot`, {
-      linkedKey,
-      linkedRef: linkedIssueRef,
-      linkedReason: linkedIssueReason,
-      linkedIssueStatus,
-      isBubbleView,
-      hasTitleInput: !!titleInput,
-      hasTitleElement: !!titleEl,
-    })
-  }, [isBubbleView, linkedIssueReason, linkedIssueRef, linkedIssueStatus, linkedKey, titleEl, titleInput])
-
-  useEffect(() => {
-    if (!isBubbleView || !linkedIssueStatus) return
-    const host = (container || document).querySelector('#calendar-jira-sync-root')
-    if (!(host instanceof HTMLElement)) {
-      console.log(`${logPrefix} Debug: host not found in container`)
-      return
-    }
-
-    const rect = host.getBoundingClientRect()
-    const style = window.getComputedStyle(host)
-    console.log(`${logPrefix} Debug: host geometry`, {
-      rect: {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      },
-      display: style.display,
-      visibility: style.visibility,
-      opacity: style.opacity,
-      zIndex: style.zIndex,
-    })
-  }, [container, isBubbleView, linkedIssueStatus, logPrefix])
 
   // Fetch transitions for linked issue
   const { data: transitions } = useQuery({
@@ -1367,50 +1229,22 @@ export default function ContentApp({
   // Open popover when we have results or when searching
   useEffect(() => {
     let nextOpen = false
-    let openReason = 'idle'
     const anchorReadyForOpen = isSuggestionAnchorReady || (open && !!suggestionAnchorRect)
 
     if (!isFocused) {
       nextOpen = false
-      openReason = 'not-focused'
     } else if (!anchorReadyForOpen) {
       nextOpen = false
-      openReason = 'anchor-not-ready'
     } else if (isSuggestionMode) {
       nextOpen = true
-      openReason = 'suggestion-mode'
     } else if (results.length > 0) {
       nextOpen = true
-      openReason = 'results-available'
     } else if (loading) {
       nextOpen = true
-      openReason = 'loading'
     } else if (source === 'local') {
       nextOpen = true
-      openReason = 'local-empty'
     } else if (source === 'api' && results.length === 0) {
       nextOpen = true
-      openReason = 'api-empty'
-    }
-
-    if (isFullEditLayout()) {
-      const snapshot = {
-        reason: openReason,
-        nextOpen,
-        anchorReadyForOpen,
-        isFocused,
-        hasAnchor: !!suggestionAnchorRect,
-        settled: isSuggestionAnchorSettled,
-        queryLength: debouncedQuery.length,
-        source,
-        loading,
-        results: results.length,
-      }
-      const key = JSON.stringify(snapshot)
-      if (key !== fullEditPopoverLogKeyRef.current) {
-        fullEditPopoverLogKeyRef.current = key
-        console.log(`${logPrefix} [FullEditAnchor] popover-gate`, snapshot)
-      }
     }
 
     setOpen(prev => prev === nextOpen ? prev : nextOpen)
@@ -1422,7 +1256,6 @@ export default function ContentApp({
     isSuggestionAnchorSettled,
     isSuggestionMode,
     loading,
-    logPrefix,
     results.length,
     source,
     suggestionAnchorRect,
@@ -1436,11 +1269,6 @@ export default function ContentApp({
       issueSelectionInFlightRef.current = false
       return
     }
-
-    console.log(`${logPrefix} Step: user selected issue`, {
-      domain: issue.domain,
-      key: issueKey,
-    })
 
     try {
       setQuery('')
@@ -1465,7 +1293,6 @@ export default function ContentApp({
         setTextControlValue(input, newTitle)
         input.dispatchEvent(new Event('input', { bubbles: true }))
         input.dispatchEvent(new Event('change', { bubbles: true }))
-        console.log(`${logPrefix} Step: title updated`, { newTitle })
       }
 
       const roots: ParentNode[] = []
@@ -1496,7 +1323,6 @@ export default function ContentApp({
         return
       }
 
-      console.log(`${logPrefix} Step: description focused`)
       setDescriptionFocusVisible(true)
       setTimeout(() => setDescriptionFocusVisible(false), 2000)
     } finally {

@@ -10,25 +10,12 @@ import styles from '../index.css?inline'
 const MOUNT_POINT_ID = 'calendar-jira-sync-root'
 const DOCK_MOUNT_POINT_ID = 'calendar-jira-sync-dock-root'
 const FLOATING_MOUNT_POINT_ID = 'calendar-jira-sync-floating-root'
-const logPrefix = '[Jira Sync][Content][Dock]'
-const contentLogPrefix = '[Jira Sync][Content][Mount]'
-let lastDockDebugKey = ''
 let activeContentMount: {
   host: HTMLElement
   reactRoot: ReturnType<typeof ReactDOM.createRoot>
   ownerModal: Element | null
 } | null = null
 const EVENT_OVERLAY_SELECTOR = '[role="dialog"], .yDmH0d, .p9lUpf, [data-viewkey="EVENTEDIT"], .XyKLOd, .A0VJ5'
-
-function getElementDebugSummary(el: Element | null): string {
-  if (!el) return 'null'
-  const id = el.id ? `#${el.id}` : ''
-  const className = (el as HTMLElement).className
-  const classSummary = typeof className === 'string' && className.trim()
-    ? `.${className.trim().split(/\s+/).slice(0, 2).join('.')}`
-    : ''
-  return `${el.tagName.toLowerCase()}${id}${classSummary}`
-}
 
 function isUsableOwner(el: Element | null): el is HTMLElement {
   if (!(el instanceof HTMLElement)) return false
@@ -42,22 +29,17 @@ function resolveOwnerFromTitleInput(titleInput: HTMLElement): HTMLElement | null
   return isUsableOwner(titleInput.parentElement) ? titleInput.parentElement : null
 }
 
-// console.log('[Calendar Jira Sync] Content script loaded')
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'FETCH_CALENDAR_EVENTS') {
-    console.log('[Jira Sync][Content] Received FETCH_CALENDAR_EVENTS')
     const events = scrapeEvents()
-    console.log('[Jira Sync][Content] Returning scraped events', { count: events.length })
     sendResponse({ events })
     return false
   }
 
   if (message.type === 'FETCH_EVENT_DESCRIPTION') {
     const { eventId } = message.payload
-    console.log('[Jira Sync][Content] Received FETCH_EVENT_DESCRIPTION', { eventId })
     fetchEventDescription(eventId).then(description => {
-      console.log('[Jira Sync][Content] Returning event description', { eventId, hasDescription: !!description })
       sendResponse({ description })
     })
     return true
@@ -65,19 +47,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return false
 })
-
-function logDockDebug(reason: string, details?: Record<string, unknown>) {
-  const detailText = details ? JSON.stringify(details) : ''
-  const key = `${reason}|${detailText}`
-  if (key === lastDockDebugKey) return
-  lastDockDebugKey = key
-  if (details) {
-    console.log(`${logPrefix} ${reason}`, details)
-  } else {
-    console.log(`${logPrefix} ${reason}`)
-  }
-}
-
 function applyThemeToElement(element: Element) {
   const bodyBg = window.getComputedStyle(document.body).backgroundColor
   const isDark = bodyBg.match(/\d+/g)?.some(c => parseInt(c) < 100)
@@ -199,48 +168,27 @@ function resolveOwningModal(el: Element | null): Element | null {
   if (el.matches(EVENT_OVERLAY_SELECTOR) && isUsableOwner(el)) return el
   const closest = el.closest(EVENT_OVERLAY_SELECTOR)
   if (isUsableOwner(closest)) return closest
-
-  console.log(`${contentLogPrefix} resolveOwningModal: no owner`, {
-    source: getElementDebugSummary(el),
-    viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
-    pathname: window.location.pathname,
-  })
   return null
 }
 
-function cleanupContentMount(reason: string) {
+function cleanupContentMount() {
   if (!activeContentMount) return
   try {
     activeContentMount.reactRoot.unmount()
   } catch (e) {
-    console.warn(`${contentLogPrefix} unmount failed`, e)
+    console.warn('[Jira Sync][Content][Mount] unmount failed', e)
   }
   if (activeContentMount.host.isConnected) {
     activeContentMount.host.remove()
   }
-  console.log(`${contentLogPrefix} cleaned active mount`, { reason })
   activeContentMount = null
 }
 
 function injectApp(modal: Element) {
-  console.log(`${contentLogPrefix} inject requested`, {
-    source: getElementDebugSummary(modal),
-    viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
-    pathname: window.location.pathname,
-  })
-
   const currentModal = resolveOwningModal(modal)
   if (!currentModal) {
-    console.log(`${contentLogPrefix} skip inject: no owning modal`, {
-      modalTag: modal.tagName,
-      source: getElementDebugSummary(modal),
-    })
     return
   }
-
-  console.log(`${contentLogPrefix} resolved owner`, {
-    owner: getElementDebugSummary(currentModal),
-  })
 
   ensureFloatingMount(currentModal)
 
@@ -322,17 +270,7 @@ function injectApp(modal: Element) {
      titleElement = resolveVisibleTitleElement(lookupRoot)
   }
 
-  console.log(`${contentLogPrefix} title resolution`, {
-    owner: getElementDebugSummary(currentModal),
-    hasTitleInput: !!titleInput,
-    hasTitleElement: !!titleElement,
-    lookupRoot: getElementDebugSummary(lookupRoot as Element),
-  })
-
   if (!titleInput && !titleElement) {
-    console.log(`${contentLogPrefix} skip inject: no title target found`, {
-      owner: getElementDebugSummary(currentModal),
-    })
     return
   }
 
@@ -340,10 +278,9 @@ function injectApp(modal: Element) {
     const sameModal = activeContentMount.ownerModal === currentModal
     const hostConnected = activeContentMount.host.isConnected
     if (sameModal && hostConnected) {
-      console.log(`${contentLogPrefix} skip inject: active mount already attached to modal`)
       return
     }
-    cleanupContentMount(sameModal ? 'active host disconnected' : 'switching modal')
+    cleanupContentMount()
   }
 
   const existingHosts = Array.from(document.querySelectorAll(`#${MOUNT_POINT_ID}`))
@@ -358,18 +295,11 @@ function injectApp(modal: Element) {
 
     const sameModalHost = existingHosts.find(host => belongsToModal(host))
     if (sameModalHost) {
-      console.log(`${contentLogPrefix} skip inject: same modal host already exists`, {
-        hosts: existingHosts.length,
-        owner: getElementDebugSummary(currentModal),
-      })
       return
     }
 
     // Clean up stale/duplicate mounts before creating a new one.
     for (const host of existingHosts) {
-      console.log(`${contentLogPrefix} removing stale host`, {
-        connected: host.isConnected,
-      })
       host.remove()
     }
   }
@@ -377,7 +307,6 @@ function injectApp(modal: Element) {
   let injected = false
 
   if (titleInput && titleInput.parentElement) {
-    // console.log('[Calendar Jira Sync] Found title input', titleInput)
     // Go up a few levels if needed to find a block container
     // Google Calendar inputs are usually wrapped in a few divs.
     // We want to be inside the main form container to avoid being treated as "outside"
@@ -422,7 +351,6 @@ function injectApp(modal: Element) {
       }
       injected = true
     } else if (titleInput.parentElement) {
-      // console.log('[Calendar Jira Sync] Fallback: Injecting after title input parent')
       titleInput.parentElement.insertAdjacentElement('afterend', host)
       injected = true
     }
@@ -453,7 +381,6 @@ function injectApp(modal: Element) {
   }
 
   if (!injected) {
-    // console.log('[Calendar Jira Sync] Title input not found or injection failed. Trying generic append.')
     // Fallback: append to the modal content
     // Try to find the main content area
     const content = currentModal.querySelector('[role="tabpanel"]') || 
@@ -461,7 +388,6 @@ function injectApp(modal: Element) {
                     currentModal.querySelector('.p9lUpf') || // Full edit page content container
                     currentModal
     
-    // console.log('[Calendar Jira Sync] Appending to content', content)
     content.appendChild(host)
   }
 
@@ -485,10 +411,6 @@ function injectApp(modal: Element) {
       reactRoot,
       ownerModal: currentModal,
     }
-    console.log(`${contentLogPrefix} ContentApp mounted`, {
-      ownerRole: activeContentMount.ownerModal?.getAttribute('role') || 'none',
-      totalHosts: document.querySelectorAll(`#${MOUNT_POINT_ID}`).length,
-    })
   } catch (e) {
     console.error('[Calendar Jira Sync] Failed to mount React app', e)
   }
@@ -511,13 +433,6 @@ function resolveInjectionTarget(node: Element): Element | null {
   }
 
   const resolved = node.querySelector(EVENT_OVERLAY_SELECTOR) || null
-
-  if (!resolved && (node.id === 'xTiIn' || node.querySelector('#xTiIn'))) {
-    console.log(`${contentLogPrefix} resolveInjectionTarget: unresolved despite title input`, {
-      source: getElementDebugSummary(node),
-      pathname: window.location.pathname,
-    })
-  }
 
   return resolved
 }
@@ -604,7 +519,6 @@ function ensureDockMount() {
     if (existingHost) {
       existingHost.style.display = 'none'
     }
-    logDockDebug('hidden: event overlay open')
     return
   }
 
@@ -613,7 +527,6 @@ function ensureDockMount() {
     if (existingHost) {
       existingHost.style.display = 'none'
     }
-    logDockDebug('hidden: no calendar container resolved')
     return
   }
 
@@ -623,17 +536,6 @@ function ensureDockMount() {
     }
     existingHost.style.display = 'block'
     updateDockPosition(existingHost, container)
-    const rect = container.getBoundingClientRect()
-    const hostRect = existingHost.getBoundingClientRect()
-    logDockDebug('shown: reused existing dock host', {
-      containerWidth: Math.round(rect.width),
-      containerHeight: Math.round(rect.height),
-      hostX: Math.round(hostRect.x),
-      hostY: Math.round(hostRect.y),
-      hostWidth: Math.round(hostRect.width),
-      hostHeight: Math.round(hostRect.height),
-      hostZ: existingHost.style.zIndex,
-    })
     return
   }
 
@@ -651,17 +553,6 @@ function ensureDockMount() {
         <CalendarDock />
       </StrictMode>
     )
-    const rect = container.getBoundingClientRect()
-    const hostRect = host.getBoundingClientRect()
-    logDockDebug('shown: mounted dock host', {
-      containerWidth: Math.round(rect.width),
-      containerHeight: Math.round(rect.height),
-      hostX: Math.round(hostRect.x),
-      hostY: Math.round(hostRect.y),
-      hostWidth: Math.round(hostRect.width),
-      hostHeight: Math.round(hostRect.height),
-      hostZ: host.style.zIndex,
-    })
   } catch (e) {
     console.error('[Jira Sync][Content] Failed to mount CalendarDock', e)
   }
@@ -691,8 +582,7 @@ const observer = new MutationObserver((mutations) => {
       if (!removedMount) continue
 
       if (activeContentMount?.host === removedMount || removedMount.contains(activeContentMount?.host || null)) {
-        console.log(`${contentLogPrefix} detected active host removal`)
-        cleanupContentMount('host removed by DOM')
+        cleanupContentMount()
       }
     }
 
@@ -711,7 +601,6 @@ const observer = new MutationObserver((mutations) => {
 })
 
 // Start observing
-// console.log('[Calendar Jira Sync] Starting observer')
 observer.observe(document.body, { childList: true, subtree: true })
 
 function ensureMountOnActiveContainers() {
@@ -724,12 +613,6 @@ function ensureMountOnActiveContainers() {
     const owner = resolveOwnerFromTitleInput(input)
     if (owner) candidates.add(owner)
   }
-
-  console.log(`${contentLogPrefix} health scan`, {
-    candidates: candidates.size,
-    activeMounted: !!activeContentMount,
-    pathname: window.location.pathname,
-  })
 
   const hasStableActiveMount = !!(activeContentMount && activeContentMount.host.isConnected && activeContentMount.ownerModal)
 
@@ -762,19 +645,11 @@ window.addEventListener('beforeunload', () => {
 // Check if dialog is already open (e.g. on reload)
 const existingDialog = document.querySelector('[role="dialog"]')
 if (existingDialog) {
-  // console.log('[Calendar Jira Sync] Found existing dialog')
-  console.log(`${contentLogPrefix} bootstrap: dialog found`, {
-    node: getElementDebugSummary(existingDialog),
-  })
   injectApp(existingDialog)
 } else {
   // Also check for event bubble
   const bubble = document.querySelector('.yDmH0d')
   if (bubble) {
-    // console.log('[Calendar Jira Sync] Found existing event bubble')
-    console.log(`${contentLogPrefix} bootstrap: bubble found`, {
-      node: getElementDebugSummary(bubble),
-    })
     injectApp(bubble)
   }
   
@@ -785,17 +660,7 @@ if (existingDialog) {
     document.querySelector('.A0VJ5') ||
     document.querySelector('#xTiIn')?.closest(EVENT_OVERLAY_SELECTOR)
   if (fullEdit) {
-    // console.log('[Calendar Jira Sync] Found existing full edit page')
-    console.log(`${contentLogPrefix} bootstrap: full edit found`, {
-      node: getElementDebugSummary(fullEdit as Element),
-    })
     injectApp(fullEdit)
-  } else {
-    console.log(`${contentLogPrefix} bootstrap: no event container found`, {
-      pathname: window.location.pathname,
-      viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
-      hasTitleInput: !!document.querySelector('#xTiIn'),
-    })
   }
 }
 

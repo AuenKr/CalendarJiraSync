@@ -3,49 +3,6 @@ import * as React from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 import { cn } from "@/lib/utils"
 
-const portalLogPrefix = "[Jira Sync][Content][Popover]"
-let lastPortalDebugKey = ""
-
-function getElementSummary(el: Element | null): string {
-  if (!el) return "null"
-  const id = el.id ? `#${el.id}` : ""
-  const className = typeof (el as HTMLElement).className === "string"
-    ? (el as HTMLElement).className.trim().split(/\s+/).slice(0, 2).join(".")
-    : ""
-  const classPart = className ? `.${className}` : ""
-  return `${el.tagName.toLowerCase()}${id}${classPart}`
-}
-
-function getStyleSnapshot(el: HTMLElement | null) {
-  if (!el) return null
-  const style = window.getComputedStyle(el)
-  const rect = el.getBoundingClientRect()
-  return {
-    position: style.position,
-    zIndex: style.zIndex,
-    pointerEvents: style.pointerEvents,
-    overflow: style.overflow,
-    opacity: style.opacity,
-    rect: {
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-    },
-  }
-}
-
-function logPortalDebug(reason: string, details?: Record<string, unknown>) {
-  const key = `${reason}|${details ? JSON.stringify(details) : ""}`
-  if (key === lastPortalDebugKey) return
-  lastPortalDebugKey = key
-  if (details) {
-    console.log(`${portalLogPrefix} ${reason}`, details)
-    return
-  }
-  console.log(`${portalLogPrefix} ${reason}`)
-}
-
 function ensureShadowPopoverContainer(host: HTMLElement): HTMLElement | null {
   if (!host.shadowRoot) return null
 
@@ -64,29 +21,14 @@ function ensureShadowPopoverContainer(host: HTMLElement): HTMLElement | null {
   container.style.pointerEvents = "none"
   container.style.zIndex = "2147483647"
 
-  logPortalDebug("configured shadow popover container", {
-    host: getElementSummary(host),
-    container: getElementSummary(container),
-    containerStyle: getStyleSnapshot(container as HTMLElement),
-  })
-
   return container as HTMLElement
 }
 
 function getPortalContainer() {
-  const activeSummary = document.activeElement instanceof Element
-    ? getElementSummary(document.activeElement)
-    : "null"
-
   const floatingHost = document.getElementById("calendar-jira-sync-floating-root")
   if (floatingHost instanceof HTMLElement) {
     const container = ensureShadowPopoverContainer(floatingHost)
     if (container) {
-      logPortalDebug("container resolved: floating host", {
-        activeElement: activeSummary,
-        host: getElementSummary(floatingHost),
-        container: getElementSummary(container),
-      })
       return container
     }
   }
@@ -97,11 +39,6 @@ function getPortalContainer() {
     if (activeHost instanceof HTMLElement) {
       const container = ensureShadowPopoverContainer(activeHost)
       if (container) {
-        logPortalDebug("container resolved: active host", {
-          activeElement: activeSummary,
-          host: getElementSummary(activeHost),
-          container: getElementSummary(container),
-        })
         return container
       }
     }
@@ -111,11 +48,6 @@ function getPortalContainer() {
   if (contentHost instanceof HTMLElement) {
     const container = ensureShadowPopoverContainer(contentHost)
     if (container) {
-      logPortalDebug("container resolved: content host", {
-        activeElement: activeSummary,
-        host: getElementSummary(contentHost),
-        container: getElementSummary(container),
-      })
       return container
     }
   }
@@ -124,18 +56,10 @@ function getPortalContainer() {
   if (dockHost instanceof HTMLElement) {
     const container = ensureShadowPopoverContainer(dockHost)
     if (container) {
-      logPortalDebug("container resolved: dock host", {
-        activeElement: activeSummary,
-        host: getElementSummary(dockHost),
-        container: getElementSummary(container),
-      })
       return container
     }
   }
 
-  logPortalDebug("container resolved: document.body fallback", {
-    activeElement: activeSummary,
-  })
   return document.body
 }
 
@@ -153,31 +77,6 @@ const PopoverContent = React.forwardRef<
   React.useEffect(() => {
     setContainer(getPortalContainer())
   }, [])
-
-  React.useEffect(() => {
-    if (!container) return
-    const root = container.getRootNode()
-    const shadowHost = root instanceof ShadowRoot ? root.host : null
-    logPortalDebug("portal container snapshot", {
-      container: getElementSummary(container),
-      containerStyle: getStyleSnapshot(container),
-      parent: getElementSummary(container.parentElement),
-      shadowHost: getElementSummary(shadowHost),
-      shadowHostStyle: shadowHost instanceof HTMLElement ? getStyleSnapshot(shadowHost) : null,
-    })
-  }, [container])
-
-  React.useEffect(() => {
-    if (!container || !contentRef.current) return
-    const frame = window.requestAnimationFrame(() => {
-      logPortalDebug("popover content snapshot", {
-        content: getElementSummary(contentRef.current),
-        contentStyle: getStyleSnapshot(contentRef.current),
-        contentParent: getElementSummary(contentRef.current?.parentElement || null),
-      })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [container])
 
   React.useEffect(() => {
     if (!contentRef.current) return

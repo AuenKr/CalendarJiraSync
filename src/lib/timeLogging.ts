@@ -120,13 +120,6 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
   const ambiguousEvents: EventDebugInfo[] = []
   const domainNotConfiguredEvents: Array<EventDebugInfo & { requestedDomain?: string }> = []
 
-  console.log('[Jira Sync][LogTime] Start run', {
-    date,
-    fetchedEvents: events.length,
-    configuredDomains,
-    lastLoggedTime: lastLoggedTime || null,
-  })
-
   for (const event of events) {
     if (event.id) {
       if (!uniqueEvents.has(event.id)) {
@@ -220,13 +213,6 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
       const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
       await addWorklogFn(issueRef, durationSeconds, jiraStarted, comment)
       loggedCount++
-      console.log('[Jira Sync][LogTime] Worklog added', {
-        eventId: event.id || `${event.title}::${event.startTime}::${event.endTime}`,
-        eventTitle: event.title,
-        issueRef: `${issueRef.domain}|${issueRef.issueKey}`,
-        durationSeconds,
-        jiraStarted,
-      })
     } catch (e) {
       console.error(`[Jira Sync] Failed to log worklog for ${issueRef.domain}|${issueRef.issueKey}`, e)
       errors++
@@ -237,14 +223,6 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     const ambiguitySuffix = ambiguousCount > 0
       ? ` (${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'} require relink)`
       : ''
-
-    console.log('[Jira Sync][LogTime] No new completed tasks found to log', {
-      eligibleCount: eligibleEvents.length,
-      ambiguousCount,
-      ambiguousEvents,
-      domainNotConfiguredCount: domainNotConfiguredEvents.length,
-      domainNotConfiguredEvents,
-    })
 
     return {
       loggedCount,
@@ -261,17 +239,6 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     message += `, skipped ${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'}`
   }
   message += '!'
-
-  console.log('[Jira Sync][LogTime] Run completed', {
-    loggedCount,
-    errors,
-    eligibleCount: eligibleEvents.length,
-    ambiguousCount,
-    ambiguousEvents,
-    domainNotConfiguredCount: domainNotConfiguredEvents.length,
-    domainNotConfiguredEvents,
-    message,
-  })
 
   return {
     loggedCount,
@@ -312,7 +279,6 @@ export async function resetWorklogsForDate(date: string): Promise<ResetRunResult
   }
 
   try {
-    console.log('[Jira Sync][ResetWorklogs] Start reset run', { date })
     const result = await resetExtensionWorklogsByDate(date)
     const failedDomains = result.failedDomains || []
 
@@ -342,24 +308,12 @@ export async function resetWorklogsForDate(date: string): Promise<ResetRunResult
     }
 
     if (result.matchedCount === 0) {
-      console.log('[Jira Sync][ResetWorklogs] No extension worklogs found', {
-        date,
-        matchedCount: result.matchedCount,
-        scannedIssues: result.scannedIssues,
-      })
       return {
         ...result,
         message: 'No extension worklogs found for selected date',
         isError: false,
       }
     }
-
-    console.log('[Jira Sync][ResetWorklogs] Reset completed', {
-      date,
-      deletedCount: result.deletedCount,
-      matchedCount: result.matchedCount,
-      scannedIssues: result.scannedIssues,
-    })
 
     return {
       ...result,
