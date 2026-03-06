@@ -83,6 +83,45 @@ function App() {
     return jiraDomains.reduce((count, each) => count + each.selectedProjectKeys.length, 0)
   }, [jiraDomains])
 
+  const knownJiraDomains = useMemo(() => {
+    const values = [
+      ...jiraDomains.map(each => each.domain),
+      ...formData.domains.map(each => normalizeJiraDomain(each)).filter(Boolean),
+    ]
+
+    return Array.from(new Set(values))
+  }, [formData.domains, jiraDomains])
+
+  const getDomainSuggestions = (value: string): string[] => {
+    const normalized = normalizeJiraDomain(value)
+    const suggestions = new Set<string>()
+
+    if (normalized) {
+      for (const each of knownJiraDomains) {
+        if (each !== normalized && each.startsWith(normalized)) {
+          suggestions.add(each)
+        }
+      }
+    } else {
+      for (const each of knownJiraDomains) {
+        suggestions.add(each)
+      }
+    }
+
+    if (normalized && !normalized.includes('.')) {
+      suggestions.add(`${normalized}.atlassian.net`)
+    }
+
+    if (normalized.includes('.') && !normalized.endsWith('.atlassian.net')) {
+      const workspace = normalized.split('.')[0]
+      if (workspace) {
+        suggestions.add(`${workspace}.atlassian.net`)
+      }
+    }
+
+    return Array.from(suggestions).slice(0, 8)
+  }
+
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -258,15 +297,28 @@ function App() {
                 </label>
 
                 {formData.domains.map((domain, index) => (
-                  <div key={`${index}-${domain}`} className="flex items-center gap-2">
+                  <div key={`domain-${index}`} className="flex items-center gap-2">
                     <input
                       type="text"
+                      id={`jira-domain-${index}`}
+                      name={`jira-domain-${index}`}
+                      list={`jira-domain-suggestions-${index}`}
                       value={domain}
                       onChange={(e) => handleDomainChange(index, e.target.value)}
                       placeholder="your-company.atlassian.net"
+                      autoComplete="on"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
                       className="w-full rounded-xl border border-[#d7cebf] bg-[#faf7f1] px-4 py-2.5 text-sm text-[#182234] outline-none transition placeholder:text-[#8a90a0] focus:border-[#1d5d8c] focus:bg-white dark:border-[#34425b] dark:bg-[#121927] dark:text-[#e7edf8] dark:placeholder:text-[#76849b] dark:focus:border-[#7eb6e3] dark:focus:bg-[#182235]"
                       required={index === 0}
                     />
+                    <datalist id={`jira-domain-suggestions-${index}`}>
+                      {getDomainSuggestions(domain).map(each => (
+                        <option key={`${index}-${each}`} value={each} />
+                      ))}
+                    </datalist>
                     <button
                       type="button"
                       onClick={() => handleRemoveDomain(index)}
