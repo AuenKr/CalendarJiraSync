@@ -28,6 +28,14 @@ interface JiraRuntimeConfig {
   jiraDomains: JiraDomainConfig[]
 }
 
+const jiraBaseRequestConfig = {
+  adapter: 'fetch' as const,
+  withCredentials: false,
+  fetchOptions: {
+    credentials: 'omit' as const,
+  },
+}
+
 async function getConfig(): Promise<JiraRuntimeConfig> {
   const storage = await chrome.storage.local.get('jira-sync-config')
   const raw = storage['jira-sync-config']
@@ -86,9 +94,7 @@ function getClient(config: JiraRuntimeConfig, domain: string): Version3Client {
     authentication: {
       basic: { email: config.email, apiToken: config.apiToken },
     },
-    baseRequestConfig: {
-      adapter: 'fetch',
-    },
+    baseRequestConfig: jiraBaseRequestConfig,
   })
 }
 
@@ -472,9 +478,7 @@ async function handleMessage(request: MessageRequest) {
           authentication: {
             basic: { email: email!, apiToken: apiToken! },
           },
-          baseRequestConfig: {
-            adapter: 'fetch',
-          },
+          baseRequestConfig: jiraBaseRequestConfig,
         })
         : (() => {
           validateConfiguredDomains(config)

@@ -8,6 +8,7 @@ import { useConfigStore } from '@/store/useConfigStore'
 import { isValidLogDate, logTimeForDateInPage, resetWorklogsForDate } from '@/lib/timeLogging'
 
 export default function CalendarDock() {
+  const logActionLabel = 'Log Work'
   const todayDate = getLocalDateString(new Date())
   const [open, setOpen] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string>(() => todayDate)
@@ -91,10 +92,10 @@ export default function CalendarDock() {
           'bg-[#ffffff] text-[#3c4043] border-[#dadce0] hover:bg-[#f1f3f4]',
           'dark:bg-[#3c4043] dark:text-[#e8eaed] dark:border-[#5f6368] dark:hover:bg-[#44474a]'
         )}
-        aria-label="Log time"
+        aria-label={logActionLabel}
       >
         <CalendarDays className="h-4 w-4" />
-        <span>Log time</span>
+        <span>{logActionLabel}</span>
       </button>
 
       {open && (
@@ -152,7 +153,7 @@ export default function CalendarDock() {
               )}
             >
               <CalendarDays className={cn('h-4 w-4', loggingTime && 'animate-pulse')} />
-              {loggingTime ? 'Logging Time...' : 'Log Time'}
+              {loggingTime ? 'Logging Work...' : logActionLabel}
             </button>
 
             <button
