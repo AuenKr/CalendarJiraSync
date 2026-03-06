@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useConfigStore } from '../store/useConfigStore'
 import { syncData, getProjects, getStoredIssues, type JiraProject } from '../lib/jira'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, Sparkles } from 'lucide-react'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { Input } from '@/components/ui/input'
@@ -77,12 +77,8 @@ function App() {
       <div className="pointer-events-none absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-[#f7d7c1] blur-2xl dark:bg-[#3a2a24]" />
 
       <div className="relative space-y-4">
-        <header className="flex items-start justify-between rounded-2xl border border-[#d6cec1] bg-[#faf7f1] p-3 shadow-[0_14px_30px_-26px_rgba(20,27,39,0.8)] transition-colors dark:border-[#2a3447] dark:bg-[#171e2b] dark:shadow-[0_14px_30px_-26px_rgba(0,0,0,1)]">
+        <header className="flex items-center justify-between rounded-2xl border border-[#d6cec1] bg-[#faf7f1] p-3 shadow-[0_14px_30px_-26px_rgba(20,27,39,0.8)] transition-colors dark:border-[#2a3447] dark:bg-[#171e2b] dark:shadow-[0_14px_30px_-26px_rgba(0,0,0,1)]">
           <div>
-            <p className="mb-1 inline-flex items-center gap-1 rounded-full border border-[#d8cfc2] bg-[#f1ebe2] px-2 py-0.5 text-[10px] font-semibold tracking-[0.12em] text-[#536078] uppercase transition-colors dark:border-[#2f3b51] dark:bg-[#1d2636] dark:text-[#a8b8ce]">
-              <Sparkles size={11} />
-              Live sync
-            </p>
             <h1 className="text-base leading-tight [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',serif]">
               Calendar Jira Sync
             </h1>
@@ -169,7 +165,7 @@ function App() {
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1d5d8c] px-4 py-2.5 text-sm font-semibold text-white transition hover:cursor-pointer hover:bg-[#174e74] dark:bg-[#2a6f9f] dark:hover:bg-[#357fb4] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw size={15} className={syncMutation.isPending ? 'animate-spin' : ''} />
-                {syncMutation.isPending ? 'Syncing tasks...' : 'Run sync now'}
+                {syncMutation.isPending ? 'Syncing tasks...' : 'Sync Jira task now'}
               </button>
               <p className="mt-2 text-center text-[10px] text-[#677086] dark:text-[#90a0b7]">
                 Last task sync: {storedIssuesData?.lastSync ? new Date(storedIssuesData.lastSync).toLocaleString() : 'Never'}

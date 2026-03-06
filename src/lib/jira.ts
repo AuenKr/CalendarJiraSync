@@ -54,7 +54,33 @@ const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise
   })
 }
 
-const TTL = 30 * 60 * 1000; // 30 minutes
+const TASK_CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutes
+let inFlightTaskCacheRefresh: Promise<SyncDataResponse> | null = null
+
+export function isTaskCacheStale(lastSync?: string): boolean {
+  if (!lastSync) return true
+
+  const lastSyncMs = new Date(lastSync).getTime()
+  if (!Number.isFinite(lastSyncMs)) return true
+
+  const staleMs = Date.now() - lastSyncMs
+  return staleMs > TASK_CACHE_TTL_MS
+}
+
+export async function refreshTaskCacheIfStale(lastSync?: string, force = false): Promise<SyncDataResponse | null> {
+  if (!force && !isTaskCacheStale(lastSync)) {
+    return null
+  }
+
+  if (!inFlightTaskCacheRefresh) {
+    inFlightTaskCacheRefresh = sendToBackground<SyncDataResponse>('SYNC_DATA', {})
+      .finally(() => {
+        inFlightTaskCacheRefresh = null
+      })
+  }
+
+  return await inFlightTaskCacheRefresh
+}
 
 const searchIssuesFromApi = async (query: string, linkedTaskId: string | null, linkedTask: Issue[]): Promise<SearchResult> => {
   const payload: SearchIssuesPayload = { query }
@@ -91,24 +117,6 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
   // Search local cache first unless explicitly forcing API search
   if (!forceApi) {
     try {
-      // Check TTL
-      const lastSync = stored.last_sync ? new Date(stored.last_sync).getTime() : 0
-      const staleMs = Date.now() - lastSync
-      if (staleMs > TTL) {
-        console.log(
-          `[Jira Sync] Task cache invalidated (stale by ${Math.max(0, Math.floor(staleMs / 1000))}s). Triggering automatic refresh...`,
-        )
-
-        // Trigger background sync (fire and forget)
-        sendToBackground<SyncDataResponse>('SYNC_DATA', {})
-          .then((result: SyncDataResponse) => {
-            console.log(`[Jira Sync] Automatic task refresh completed. Synced ${result.count} tasks.`)
-          })
-          .catch((e) => {
-            console.error('[Jira Sync] Automatic task refresh failed', e)
-          })
-      }
-
       if (stored.issues && stored.issues.length > 0) {
         const fuse = new Fuse(stored.issues, {
           keys: ['key', 'fields.summary'],

@@ -9,8 +9,38 @@ import styles from '../index.css?inline'
 
 const MOUNT_POINT_ID = 'calendar-jira-sync-root'
 const DOCK_MOUNT_POINT_ID = 'calendar-jira-sync-dock-root'
+const FLOATING_MOUNT_POINT_ID = 'calendar-jira-sync-floating-root'
 const logPrefix = '[Jira Sync][Content][Dock]'
+const contentLogPrefix = '[Jira Sync][Content][Mount]'
 let lastDockDebugKey = ''
+let activeContentMount: {
+  host: HTMLElement
+  reactRoot: ReturnType<typeof ReactDOM.createRoot>
+  ownerModal: Element | null
+} | null = null
+const EVENT_OVERLAY_SELECTOR = '[role="dialog"], .yDmH0d, .p9lUpf, [data-viewkey="EVENTEDIT"], .XyKLOd, .A0VJ5'
+
+function getElementDebugSummary(el: Element | null): string {
+  if (!el) return 'null'
+  const id = el.id ? `#${el.id}` : ''
+  const className = (el as HTMLElement).className
+  const classSummary = typeof className === 'string' && className.trim()
+    ? `.${className.trim().split(/\s+/).slice(0, 2).join('.')}`
+    : ''
+  return `${el.tagName.toLowerCase()}${id}${classSummary}`
+}
+
+function isUsableOwner(el: Element | null): el is HTMLElement {
+  if (!(el instanceof HTMLElement)) return false
+  if (el === document.body || el === document.documentElement) return false
+  return true
+}
+
+function resolveOwnerFromTitleInput(titleInput: HTMLElement): HTMLElement | null {
+  const owner = titleInput.closest(EVENT_OVERLAY_SELECTOR)
+  if (isUsableOwner(owner)) return owner
+  return isUsableOwner(titleInput.parentElement) ? titleInput.parentElement : null
+}
 
 // console.log('[Calendar Jira Sync] Content script loaded')
 
@@ -101,10 +131,118 @@ function createShadowRootMount(host: HTMLElement, rootClassName = 'calendar-jira
   return { shadow, root }
 }
 
-function injectApp(modal: Element) {
-  if (modal.querySelector(`#${MOUNT_POINT_ID}`)) {
+function resolveFloatingParent(ownerModal?: Element | null): HTMLElement {
+  if (ownerModal instanceof HTMLElement) {
+    const modalShell = ownerModal.closest('#yDmH0d, .yDmH0d, [role="dialog"]')
+    if (modalShell instanceof HTMLElement) {
+      return modalShell
+    }
+  }
+  return document.body
+}
+
+function ensureFloatingMount(ownerModal?: Element | null) {
+  const existing = document.getElementById(FLOATING_MOUNT_POINT_ID)
+  const targetParent = resolveFloatingParent(ownerModal)
+
+  if (existing) {
+    if (existing.parentElement !== targetParent) {
+      targetParent.appendChild(existing)
+    }
     return
   }
+
+  const host = document.createElement('div')
+  host.id = FLOATING_MOUNT_POINT_ID
+  host.style.position = 'fixed'
+  host.style.left = '0'
+  host.style.top = '0'
+  host.style.width = '100vw'
+  host.style.height = '100vh'
+  host.style.zIndex = '2147483647'
+  host.style.pointerEvents = 'none'
+  host.style.background = 'transparent'
+
+  targetParent.appendChild(host)
+  const { shadow } = createShadowRootMount(host, 'calendar-jira-sync-floating-root')
+
+  let popoverContainer = shadow.getElementById('popover-container')
+  if (!popoverContainer) {
+    popoverContainer = document.createElement('div')
+    popoverContainer.id = 'popover-container'
+    shadow.appendChild(popoverContainer)
+  }
+
+  popoverContainer.style.position = 'fixed'
+  popoverContainer.style.left = '0'
+  popoverContainer.style.top = '0'
+  popoverContainer.style.width = '100vw'
+  popoverContainer.style.height = '100vh'
+  popoverContainer.style.pointerEvents = 'none'
+  popoverContainer.style.zIndex = '2147483647'
+}
+
+function resolveOwningModal(el: Element | null): Element | null {
+  if (!el) return null
+
+  const explicitTitleInput = el instanceof HTMLInputElement && el.id === 'xTiIn'
+    ? el
+    : null
+  const discoveredTitleInput = explicitTitleInput || (el.querySelector('#xTiIn') as HTMLInputElement | null)
+  if (discoveredTitleInput instanceof HTMLElement) {
+    const ownerFromTitle = resolveOwnerFromTitleInput(discoveredTitleInput)
+    if (ownerFromTitle) {
+      return ownerFromTitle
+    }
+  }
+
+  if (el.matches(EVENT_OVERLAY_SELECTOR) && isUsableOwner(el)) return el
+  const closest = el.closest(EVENT_OVERLAY_SELECTOR)
+  if (isUsableOwner(closest)) return closest
+
+  console.log(`${contentLogPrefix} resolveOwningModal: no owner`, {
+    source: getElementDebugSummary(el),
+    viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
+    pathname: window.location.pathname,
+  })
+  return null
+}
+
+function cleanupContentMount(reason: string) {
+  if (!activeContentMount) return
+  try {
+    activeContentMount.reactRoot.unmount()
+  } catch (e) {
+    console.warn(`${contentLogPrefix} unmount failed`, e)
+  }
+  if (activeContentMount.host.isConnected) {
+    activeContentMount.host.remove()
+  }
+  console.log(`${contentLogPrefix} cleaned active mount`, { reason })
+  activeContentMount = null
+}
+
+function injectApp(modal: Element) {
+  console.log(`${contentLogPrefix} inject requested`, {
+    source: getElementDebugSummary(modal),
+    viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
+    pathname: window.location.pathname,
+  })
+
+  const currentModal = resolveOwningModal(modal)
+  if (!currentModal) {
+    console.log(`${contentLogPrefix} skip inject: no owning modal`, {
+      modalTag: modal.tagName,
+      source: getElementDebugSummary(modal),
+    })
+    return
+  }
+
+  console.log(`${contentLogPrefix} resolved owner`, {
+    owner: getElementDebugSummary(currentModal),
+  })
+
+  ensureFloatingMount(currentModal)
 
   const keyPattern = /\b[A-Z][A-Z0-9]+-\d+\b/
 
@@ -151,17 +289,17 @@ function injectApp(modal: Element) {
 
   const isEventEditView = document.body.getAttribute('data-viewfamily') === 'EVENT_EDIT'
   const lookupRoot = isEventEditView
-    ? (modal.querySelector('[data-viewkey="EVENTEDIT"]') ||
-      modal.querySelector('.XyKLOd') ||
-      modal.querySelector('.A0VJ5') ||
-      modal)
-    : modal
+    ? (currentModal.querySelector('[data-viewkey="EVENTEDIT"]') ||
+      currentModal.querySelector('.XyKLOd') ||
+      currentModal.querySelector('.A0VJ5') ||
+      currentModal)
+    : currentModal
 
   const host = document.createElement('div')
   host.id = MOUNT_POINT_ID
   // Ensure high z-index to be above Google Calendar modals
   host.style.position = 'relative'
-  host.style.zIndex = '9999'
+  host.style.zIndex = '2147483647'
   // host.style.marginTop = '8px' // Removed to prevent layout issues with date field
 
   // Try to find the title input to inject after it
@@ -169,12 +307,12 @@ function injectApp(modal: Element) {
   let titleInput = resolveVisibleTitleInput(lookupRoot)
 
   // Check if modal itself is the input (e.g. if observer passed the input directly)
-  if (!titleInput && modal instanceof HTMLInputElement) {
-    if (modal.id === 'xTiIn' || 
-        modal.getAttribute('aria-label') === 'Add title' || 
-        modal.getAttribute('aria-label') === 'Title') {
-      if (isVisibleInput(modal)) {
-        titleInput = modal
+  if (!titleInput && currentModal instanceof HTMLInputElement) {
+    if (currentModal.id === 'xTiIn' || 
+        currentModal.getAttribute('aria-label') === 'Add title' || 
+        currentModal.getAttribute('aria-label') === 'Title') {
+      if (isVisibleInput(currentModal)) {
+        titleInput = currentModal
       }
     }
   }
@@ -184,8 +322,56 @@ function injectApp(modal: Element) {
      titleElement = resolveVisibleTitleElement(lookupRoot)
   }
 
+  console.log(`${contentLogPrefix} title resolution`, {
+    owner: getElementDebugSummary(currentModal),
+    hasTitleInput: !!titleInput,
+    hasTitleElement: !!titleElement,
+    lookupRoot: getElementDebugSummary(lookupRoot as Element),
+  })
+
   if (!titleInput && !titleElement) {
+    console.log(`${contentLogPrefix} skip inject: no title target found`, {
+      owner: getElementDebugSummary(currentModal),
+    })
     return
+  }
+
+  if (activeContentMount) {
+    const sameModal = activeContentMount.ownerModal === currentModal
+    const hostConnected = activeContentMount.host.isConnected
+    if (sameModal && hostConnected) {
+      console.log(`${contentLogPrefix} skip inject: active mount already attached to modal`)
+      return
+    }
+    cleanupContentMount(sameModal ? 'active host disconnected' : 'switching modal')
+  }
+
+  const existingHosts = Array.from(document.querySelectorAll(`#${MOUNT_POINT_ID}`))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+
+  if (existingHosts.length > 0) {
+    const belongsToModal = (host: HTMLElement) => {
+      if (currentModal.contains(host)) return true
+      const owner = host.closest(EVENT_OVERLAY_SELECTOR)
+      return owner === currentModal
+    }
+
+    const sameModalHost = existingHosts.find(host => belongsToModal(host))
+    if (sameModalHost) {
+      console.log(`${contentLogPrefix} skip inject: same modal host already exists`, {
+        hosts: existingHosts.length,
+        owner: getElementDebugSummary(currentModal),
+      })
+      return
+    }
+
+    // Clean up stale/duplicate mounts before creating a new one.
+    for (const host of existingHosts) {
+      console.log(`${contentLogPrefix} removing stale host`, {
+        connected: host.isConnected,
+      })
+      host.remove()
+    }
   }
 
   let injected = false
@@ -232,12 +418,12 @@ function injectApp(modal: Element) {
       titleInput.parentElement.insertAdjacentElement('afterend', host)
       injected = true
     }
-  } else if (titleElement && modal instanceof HTMLElement) {
+  } else if (titleElement && currentModal instanceof HTMLElement) {
       // Use a stable in-flow anchor in bubble layout to avoid geometry drift.
-      const whenContent = modal.querySelector('#xDetDlgWhen .JEx5le, #xDetDlgWhen .bgOWSb, #xDetDlgWhen')
-      const bubbleSection = modal.querySelector('.hMdQi, [jsname="sV9x3c"]')
+      const whenContent = currentModal.querySelector('#xDetDlgWhen .JEx5le, #xDetDlgWhen .bgOWSb, #xDetDlgWhen')
+      const bubbleSection = currentModal.querySelector('.hMdQi, [jsname="sV9x3c"]')
       host.style.position = 'relative'
-      host.style.zIndex = '10000'
+      host.style.zIndex = '2147483647'
       host.style.marginTop = '6px'
       host.style.marginBottom = '2px'
 
@@ -262,10 +448,10 @@ function injectApp(modal: Element) {
     // console.log('[Calendar Jira Sync] Title input not found or injection failed. Trying generic append.')
     // Fallback: append to the modal content
     // Try to find the main content area
-    const content = modal.querySelector('[role="tabpanel"]') || 
-                    modal.querySelector('.yDmH0d') || // Common GCal class for modal content
-                    modal.querySelector('.p9lUpf') || // Full edit page content container
-                    modal
+    const content = currentModal.querySelector('[role="tabpanel"]') || 
+                    currentModal.querySelector('.yDmH0d') || // Common GCal class for modal content
+                    currentModal.querySelector('.p9lUpf') || // Full edit page content container
+                    currentModal
     
     // console.log('[Calendar Jira Sync] Appending to content', content)
     content.appendChild(host)
@@ -274,41 +460,63 @@ function injectApp(modal: Element) {
   const { root } = createShadowRootMount(host)
 
   try {
-    ReactDOM.createRoot(root).render(
+    const reactRoot = ReactDOM.createRoot(root)
+    reactRoot.render(
       <StrictMode>
         <QueryClientProvider client={queryClient}>
           <ContentApp 
             titleInput={titleInput as HTMLInputElement} 
             titleElement={titleElement}
-            container={modal as HTMLElement}
+            container={currentModal as HTMLElement}
           />
         </QueryClientProvider>
       </StrictMode>
     )
-    console.log('[Jira Sync][Content] ContentApp mounted')
+    activeContentMount = {
+      host,
+      reactRoot,
+      ownerModal: currentModal,
+    }
+    console.log(`${contentLogPrefix} ContentApp mounted`, {
+      ownerRole: activeContentMount.ownerModal?.getAttribute('role') || 'none',
+      totalHosts: document.querySelectorAll(`#${MOUNT_POINT_ID}`).length,
+    })
   } catch (e) {
     console.error('[Calendar Jira Sync] Failed to mount React app', e)
   }
 }
 
 function resolveInjectionTarget(node: Element): Element | null {
-  if (node.matches('[role="dialog"], .yDmH0d, .p9lUpf')) return node
+  if (node.matches(EVENT_OVERLAY_SELECTOR)) return node
 
-  if (node.id === 'xTiIn' && node.parentElement) {
-    return node.parentElement
+  if (node.id === 'xTiIn' && node instanceof HTMLElement) {
+    return resolveOwnerFromTitleInput(node)
   }
 
   const dialog = node.closest('[role="dialog"]')
   if (dialog) return dialog
 
-  return node.querySelector('[role="dialog"], .yDmH0d, .p9lUpf') ||
-    node.querySelector('#xTiIn')?.parentElement ||
-    null
+  const nestedTitleInput = node.querySelector('#xTiIn')
+  if (nestedTitleInput instanceof HTMLElement) {
+    const owner = resolveOwnerFromTitleInput(nestedTitleInput)
+    if (owner) return owner
+  }
+
+  const resolved = node.querySelector(EVENT_OVERLAY_SELECTOR) || null
+
+  if (!resolved && (node.id === 'xTiIn' || node.querySelector('#xTiIn'))) {
+    console.log(`${contentLogPrefix} resolveInjectionTarget: unresolved despite title input`, {
+      source: getElementDebugSummary(node),
+      pathname: window.location.pathname,
+    })
+  }
+
+  return resolved
 }
 
 function shouldCheckForInjection(node: Element): boolean {
-  if (node.matches('[role="dialog"], .yDmH0d, .p9lUpf, #xTiIn')) return true
-  return !!node.querySelector('[role="dialog"], .yDmH0d, .p9lUpf, #xTiIn')
+  if (node.matches(`${EVENT_OVERLAY_SELECTOR}, #xTiIn`)) return true
+  return !!node.querySelector(`${EVENT_OVERLAY_SELECTOR}, #xTiIn`)
 }
 
 function isVisibleElement(el: Element): boolean {
@@ -325,7 +533,7 @@ function hasOpenEventOverlay(): boolean {
     return false
   }
 
-  const eventContainer = titleInput.closest('[role="dialog"], .p9lUpf, .yDmH0d')
+  const eventContainer = titleInput.closest(EVENT_OVERLAY_SELECTOR)
   return !!eventContainer && isVisibleElement(eventContainer)
 }
 
@@ -451,6 +659,8 @@ function ensureDockMount() {
   }
 }
 
+ensureFloatingMount()
+
 const observer = new MutationObserver((mutations) => {
   let shouldRefreshDock = false
   for (const mutation of mutations) {
@@ -472,14 +682,9 @@ const observer = new MutationObserver((mutations) => {
       const removedMount = node.id === MOUNT_POINT_ID ? node : node.querySelector(`#${MOUNT_POINT_ID}`)
       if (!removedMount) continue
 
-      const target = mutation.target instanceof Element
-        ? resolveInjectionTarget(mutation.target)
-        : null
-      if (target) {
-        console.log('[Jira Sync][Content] Detected removed mount, reinjecting', {
-          role: target.getAttribute('role') || 'none',
-        })
-        injectApp(target)
+      if (activeContentMount?.host === removedMount || removedMount.contains(activeContentMount?.host || null)) {
+        console.log(`${contentLogPrefix} detected active host removal`)
+        cleanupContentMount('host removed by DOM')
       }
     }
 
@@ -502,10 +707,21 @@ const observer = new MutationObserver((mutations) => {
 observer.observe(document.body, { childList: true, subtree: true })
 
 function ensureMountOnActiveContainers() {
-  const candidates = [
-    ...Array.from(document.querySelectorAll('[role="dialog"]')),
-    ...Array.from(document.querySelectorAll('.yDmH0d')),
-  ]
+  const candidates = new Set<Element>()
+  for (const node of document.querySelectorAll(EVENT_OVERLAY_SELECTOR)) {
+    candidates.add(node)
+  }
+  for (const input of document.querySelectorAll('#xTiIn')) {
+    if (!(input instanceof HTMLElement)) continue
+    const owner = resolveOwnerFromTitleInput(input)
+    if (owner) candidates.add(owner)
+  }
+
+  console.log(`${contentLogPrefix} health scan`, {
+    candidates: candidates.size,
+    activeMounted: !!activeContentMount,
+    pathname: window.location.pathname,
+  })
 
   for (const candidate of candidates) {
     if (!(candidate instanceof Element)) continue
@@ -532,20 +748,39 @@ window.addEventListener('beforeunload', () => {
 const existingDialog = document.querySelector('[role="dialog"]')
 if (existingDialog) {
   // console.log('[Calendar Jira Sync] Found existing dialog')
+  console.log(`${contentLogPrefix} bootstrap: dialog found`, {
+    node: getElementDebugSummary(existingDialog),
+  })
   injectApp(existingDialog)
 } else {
   // Also check for event bubble
   const bubble = document.querySelector('.yDmH0d')
   if (bubble) {
     // console.log('[Calendar Jira Sync] Found existing event bubble')
+    console.log(`${contentLogPrefix} bootstrap: bubble found`, {
+      node: getElementDebugSummary(bubble),
+    })
     injectApp(bubble)
   }
   
   // Check for full edit page
-  const fullEdit = document.querySelector('.p9lUpf') || document.querySelector('#xTiIn')?.closest('.p9lUpf')
+  const fullEdit = document.querySelector('.p9lUpf') ||
+    document.querySelector('[data-viewkey="EVENTEDIT"]') ||
+    document.querySelector('.XyKLOd') ||
+    document.querySelector('.A0VJ5') ||
+    document.querySelector('#xTiIn')?.closest(EVENT_OVERLAY_SELECTOR)
   if (fullEdit) {
     // console.log('[Calendar Jira Sync] Found existing full edit page')
+    console.log(`${contentLogPrefix} bootstrap: full edit found`, {
+      node: getElementDebugSummary(fullEdit as Element),
+    })
     injectApp(fullEdit)
+  } else {
+    console.log(`${contentLogPrefix} bootstrap: no event container found`, {
+      pathname: window.location.pathname,
+      viewFamily: document.body.getAttribute('data-viewfamily') || 'none',
+      hasTitleInput: !!document.querySelector('#xTiIn'),
+    })
   }
 }
 

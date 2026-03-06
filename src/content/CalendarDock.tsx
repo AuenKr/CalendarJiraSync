@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { getLocalDateString } from '@/lib/worklogMetadata'
 import { scrapeEvents, fetchEventDescription } from './scraper'
 import { useConfigStore } from '@/store/useConfigStore'
-import { logTimeForDateInPage, resetWorklogsForDate } from '@/lib/timeLogging'
+import { isValidLogDate, logTimeForDateInPage, resetWorklogsForDate } from '@/lib/timeLogging'
 
 export default function CalendarDock() {
   const todayDate = getLocalDateString(new Date())
@@ -16,6 +16,7 @@ export default function CalendarDock() {
   const [logResult, setLogResult] = useState('')
   const [resetResult, setResetResult] = useState('')
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const isDateValid = isValidLogDate(selectedDate)
 
   const { lastLoggedTimes, setLastLoggedTime, clearLastLoggedTime } = useConfigStore()
 
@@ -36,6 +37,12 @@ export default function CalendarDock() {
   }, [open])
 
   const handleLogTime = async () => {
+    if (!isDateValid) {
+      setLogResult('Please select a valid date')
+      setResetResult('')
+      return
+    }
+
     setLoggingTime(true)
     setLogResult('')
     setResetResult('')
@@ -56,6 +63,12 @@ export default function CalendarDock() {
   }
 
   const handleResetWorklogs = async () => {
+    if (!isDateValid) {
+      setResetResult('Please select a valid date')
+      setLogResult('')
+      return
+    }
+
     setResettingWorklogs(true)
     setResetResult('')
     setLogResult('')
@@ -131,7 +144,7 @@ export default function CalendarDock() {
 
             <button
               onClick={() => void handleLogTime()}
-              disabled={loggingTime || resettingWorklogs}
+              disabled={loggingTime || resettingWorklogs || !isDateValid}
               title="Logs Jira work time from completed Jira-linked events for the selected date."
               className={cn(
                 'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',
@@ -144,7 +157,7 @@ export default function CalendarDock() {
 
             <button
               onClick={() => void handleResetWorklogs()}
-              disabled={resettingWorklogs || loggingTime}
+              disabled={resettingWorklogs || loggingTime || !isDateValid}
               title="Deletes extension-created Jira worklogs for the selected date."
               className={cn(
                 'inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60',

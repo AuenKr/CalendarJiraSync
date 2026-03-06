@@ -2,12 +2,18 @@
 
 ## Features
 
-1. [] Support multiple jira domains
+1. [Require more thoughts and understanding of this flow need to get an account which have multiple jira accounts] Support multiple jira domains/instance.
    Some people work on multiple different jira domain eg: `appointy.atlassian.net` and `mathnasium.atlassian.net` and they want to sync from all domain task.
+   Since same account is connected to multiple jira instance, the same api token will work on all jira instance for that account.
    Add a extra field(plus btn to add more jira domains) in the setup page to add multiple jira domain.
    This will change a lot of things in the code.
    - Syncing the task from all domain
    - matching task and domain properly
+   - redirect btn
+   - fetching task status
+   - work log
+   - reset work log
+   - run sync task
    - where ever the jira task is added you have to add domain thing also(to link task + domain) find it.
    - Make a good working solution which is architecture good not just some hotfix.
 
@@ -29,7 +35,7 @@
    Dark mode: it should be white text color
    Light mode: it should be black text color
 
-2. [DOEN] When user create a new event, and start typing it the suggestion from jira task is shown. This not great enough.
+2. [DONE] When user create a new event, and start typing it the suggestion from jira task is shown. This not great enough.
    But i want when user open to create event, it should show the jira suggestion. List of jira task should be visible.
    Some time user do not remember exact name for jira task.
 
@@ -41,13 +47,22 @@
 
 ## Bugs
 
-1. [] The sync task caching not working.
+1. [DONE] The sync task caching not working.
    Rename run sync now to sync jira task now
    remove live sync on top of pop page
 
-2. [] When space in calendar is less and event box is open. The jira suggestion get overwritten by google calendar titles.
+2. [Not fixed] overflow layering scenario.
+   When space in calendar is less and event box is open. The jira suggestion get overwritten by google calendar titles.
    Example: When i try to create an event on Saturday. Some tags overlay on each other
+   See in the attached image
 
-3. [] Date Picker reopens when u click on date filed when date picker is already open.
+   Overflow works fine but issue occur when event title is empty and user click on the link jira task.
+   This breaks the ui. for some reason event popup get disappear not event is created.
+   Error in extension logs:
+   [Jira Sync][ContentApp] Step failed: description focus lock failed
+   Context
+   <https://calendar.google.com/calendar/u/0/r/week/2026/2/22>
+
+3. [DONE] Date Picker reopens when u click on date filed when date picker is already open.
    Either is should close or Remain open
    I prefer to close it.

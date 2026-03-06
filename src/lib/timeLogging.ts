@@ -31,6 +31,21 @@ interface JiraConfig {
   apiToken?: string
 }
 
+export function isValidLogDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+
+  const [yearPart, monthPart, dayPart] = date.split('-')
+  const year = Number(yearPart)
+  const month = Number(monthPart)
+  const day = Number(dayPart)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false
+
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+}
+
 function getDayBounds(date: string) {
   const dayStart = new Date(`${date}T00:00:00`)
   const dayEnd = new Date(`${date}T23:59:59.999`)
@@ -76,6 +91,16 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     addWorklogFn = addWorklog,
     now = new Date(),
   } = input
+
+  if (!isValidLogDate(date)) {
+    return {
+      loggedCount: 0,
+      errors: 0,
+      eligibleCount: 0,
+      message: 'Please select a valid date',
+      isError: true,
+    }
+  }
 
   const events = await fetchEvents()
 
@@ -203,6 +228,16 @@ export async function logTimeForDateInPage(input: LogTimeRunInput): Promise<LogT
 }
 
 export async function resetWorklogsForDate(date: string): Promise<ResetRunResult> {
+  if (!isValidLogDate(date)) {
+    return {
+      deletedCount: 0,
+      matchedCount: 0,
+      scannedIssues: 0,
+      message: 'Please select a valid date',
+      isError: true,
+    }
+  }
+
   try {
     const result = await resetExtensionWorklogsByDate(date)
     if (result.matchedCount === 0) {

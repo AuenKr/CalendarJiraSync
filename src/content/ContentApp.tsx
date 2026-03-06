@@ -2,7 +2,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, type JiraIssue, type JiraTransition } from '../lib/jira'
+import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraIssue, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
 
 // Debounce hook
@@ -426,6 +426,7 @@ export default function ContentApp({
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
   const emptyResolutionCountRef = useRef(0)
+  const issueSelectionInFlightRef = useRef(false)
 
   const resolveLinkedKey = useCallback((): LinkedKeyResolution => {
     const root = container || document
@@ -746,12 +747,30 @@ export default function ContentApp({
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 
-  const { data: storedIssuesData } = useQuery({
+  const { data: storedIssuesData, refetch: refetchStoredIssues } = useQuery({
     queryKey: ['stored-issues'],
     queryFn: getStoredIssues,
     enabled: isFocused,
     staleTime: 1000 * 60 * 1,
   })
+
+  useEffect(() => {
+    if (!isFocused) return
+    if (!storedIssuesData) return
+
+    const lastSync = storedIssuesData.lastSync
+    if (!isTaskCacheStale(lastSync)) return
+
+    refreshTaskCacheIfStale(lastSync)
+      .then((result) => {
+        if (!result) return
+        void refetchStoredIssues()
+        void queryClient.invalidateQueries({ queryKey: ['issues'] })
+      })
+      .catch((e) => {
+        console.error(`${logPrefix} Failed to refresh stale task cache`, e)
+      })
+  }, [isFocused, logPrefix, queryClient, refetchStoredIssues, storedIssuesData])
 
   // Process results: Sort by status and ensure linked issue is present
   const results = [...(data?.issues || [])].sort((a, b) => {
@@ -865,57 +884,63 @@ export default function ContentApp({
   }, [isSuggestionMode, results.length, loading, source, open, isFocused])
 
   const handleSelect = async (issue: JiraIssue) => {
+    if (issueSelectionInFlightRef.current) return
+    issueSelectionInFlightRef.current = true
     console.log(`${logPrefix} Step: user selected issue`, { key: issue.key })
-    setQuery('')
-    setForceApi(false)
-    setOpen(false)
-    setDescriptionFocusVisible(false)
+    try {
+      setQuery('')
+      setForceApi(false)
+      setOpen(false)
+      setDescriptionFocusVisible(false)
 
-    // Update Google Calendar Title
-    const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
-    const newTitle = `[${issue.key}] ${issue.fields.summary}`
+      // Update Google Calendar Title
+      const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
+      const newTitle = `[${issue.key}] ${issue.fields.summary}`
 
-    if (input) {
-      // Focus first to simulate user interaction
-      input.focus()
+      if (input) {
+        // Focus first to simulate user interaction
+        input.focus()
 
-      setTextControlValue(input, newTitle)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-      input.dispatchEvent(new Event('change', { bubbles: true }))
-      console.log(`${logPrefix} Step: title updated`, { newTitle })
-    }
-
-    const roots: ParentNode[] = []
-    if (container) roots.push(container)
-    roots.push(document)
-
-    const { editor: descriptionEditor, openControlFound } = await resolveDescriptionEditor(roots)
-    if (!descriptionEditor) {
-      if (!openControlFound) {
-        console.warn(`${logPrefix} Step failed: description open control not found`)
+        setTextControlValue(input, newTitle)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        console.log(`${logPrefix} Step: title updated`, { newTitle })
       }
-      console.warn(`${logPrefix} Step failed: description editor not found`)
-      return
+
+      const roots: ParentNode[] = []
+      if (container) roots.push(container)
+      roots.push(document)
+
+      const { editor: descriptionEditor, openControlFound } = await resolveDescriptionEditor(roots)
+      if (!descriptionEditor) {
+        if (!openControlFound) {
+          console.warn(`${logPrefix} Step failed: description open control not found`)
+        }
+        console.warn(`${logPrefix} Step failed: description editor not found`)
+        return
+      }
+
+      const existingDescription = getEditorValue(descriptionEditor)
+      const caretPosition = existingDescription.length
+
+      const updatedEditor = getDescriptionEditor(roots)
+      const focusTarget = updatedEditor && updatedEditor.isConnected ? updatedEditor : descriptionEditor
+      const focused = await lockDescriptionFocus(
+        focusTarget,
+        caretPosition,
+        () => getDescriptionEditor(roots),
+      )
+      if (!focused) {
+        console.warn(`${logPrefix} Step failed: description focus lock failed`)
+        return
+      }
+
+      console.log(`${logPrefix} Step: description focused`)
+      setDescriptionFocusVisible(true)
+      setTimeout(() => setDescriptionFocusVisible(false), 2000)
+    } finally {
+      issueSelectionInFlightRef.current = false
     }
-
-    const existingDescription = getEditorValue(descriptionEditor)
-    const caretPosition = existingDescription.length
-
-    const updatedEditor = getDescriptionEditor(roots)
-    const focusTarget = updatedEditor && updatedEditor.isConnected ? updatedEditor : descriptionEditor
-    const focused = await lockDescriptionFocus(
-      focusTarget,
-      caretPosition,
-      () => getDescriptionEditor(roots),
-    )
-    if (!focused) {
-      console.warn(`${logPrefix} Step failed: description focus lock failed`)
-      return
-    }
-
-    console.log(`${logPrefix} Step: description focused`)
-    setDescriptionFocusVisible(true)
-    setTimeout(() => setDescriptionFocusVisible(false), 2000)
   }
 
   return (
@@ -1014,7 +1039,7 @@ export default function ContentApp({
           <div className="w-full h-0" />
         </PopoverTrigger>
         <PopoverContent
-          className="w-100 p-0 border-border"
+          className="z-[2147483647] w-100 p-0 border-border"
           align="start"
           side="bottom"
           sideOffset={10}
@@ -1047,8 +1072,17 @@ export default function ContentApp({
 
             {visibleIssues.map(issue => (
               <button
+                type="button"
                 key={issue.id}
-                onClick={() => void handleSelect(issue)}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  void handleSelect(issue)
+                }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors group"
               >
                 <div className="flex items-center justify-between">
@@ -1071,7 +1105,16 @@ export default function ContentApp({
             {/* Show "Search in Jira" ONLY if we haven't searched API yet (source is local) */}
             {!isSuggestionMode && debouncedQuery.length >= 2 && !loading && source === 'local' && results.length > 0 && (
               <button
-                onClick={() => setForceApi(true)}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setForceApi(true)
+                }}
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm text-primary flex items-center gap-2 transition-colors border-t border-border"
               >
                 <RefreshCw size={14} />
