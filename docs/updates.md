@@ -51,7 +51,7 @@
    Rename run sync now to sync jira task now
    remove live sync on top of pop page
 
-2. [Not fixed] overflow layering scenario.
+2. [DONE] overflow layering scenario.
    When space in calendar is less and event box is open. The jira suggestion get overwritten by google calendar titles.
    Example: When i try to create an event on Saturday. Some tags overlay on each other
    See in the attached image
@@ -67,4 +67,7 @@
    Either is should close or Remain open
    I prefer to close it.
 
-4. [] When page is loaded, and user click on new time slot for creating an event, the jira suggestion box appears at top fix it.
+4. [DONE] When page is loaded, and user click on new time slot for creating an event, the jira suggestion box appears at top fix it.
+
+5. [] The cache revalidation for sync jira task does not give user the feedback that something is happening in background. It just show the message no jira task to sync.
+   It should automatically trigger and while this action is doing u should tell the user something

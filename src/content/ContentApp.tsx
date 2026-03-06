@@ -560,6 +560,7 @@ export default function ContentApp({
   const [linkedIssueRequestedDomain, setLinkedIssueRequestedDomain] = useState<string | null>(null)
   const [linkedIssueHintKey, setLinkedIssueHintKey] = useState<string | null>(null)
   const [configuredDomains, setConfiguredDomains] = useState<string[]>([])
+  const [isConfigReady, setIsConfigReady] = useState(false)
   const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
   const [isCacheRevalidating, setIsCacheRevalidating] = useState(false)
   const [cacheRevalidationFailed, setCacheRevalidationFailed] = useState(false)
@@ -927,6 +928,8 @@ export default function ContentApp({
       } catch (e) {
         console.warn(`${logPrefix} Failed to load Jira config`, e)
         setConfiguredDomains([])
+      } finally {
+        setIsConfigReady(true)
       }
     }
 
@@ -1147,7 +1150,12 @@ export default function ContentApp({
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 
-  const { data: storedIssuesData, refetch: refetchStoredIssues } = useQuery({
+  const {
+    data: storedIssuesData,
+    refetch: refetchStoredIssues,
+    isLoading: isStoredIssuesLoading,
+    isFetched: isStoredIssuesFetched,
+  } = useQuery({
     queryKey: ['stored-issues'],
     queryFn: getStoredIssues,
     enabled: isFocused,
@@ -1160,18 +1168,25 @@ export default function ContentApp({
       setIsCacheRevalidating(false)
       return
     }
-    if (!storedIssuesData) return
-    if (configuredDomains.length === 0) return
-
-    const lastSync = storedIssuesData.lastSync
-    if (!isTaskCacheStale(lastSync)) {
+    if (!isConfigReady || isStoredIssuesLoading || !isStoredIssuesFetched || !storedIssuesData) return
+    if (configuredDomains.length === 0) {
       cacheRevalidationAttemptRef.current = null
       setIsCacheRevalidating(false)
       setCacheRevalidationFailed(false)
       return
     }
 
-    const revalidationKey = lastSync || 'missing-last-sync'
+    const lastSync = storedIssuesData.lastSync
+    const hasNoStoredIssues = (storedIssuesData.issues || []).length === 0
+    const shouldRevalidate = isTaskCacheStale(lastSync) || hasNoStoredIssues
+    if (!shouldRevalidate) {
+      cacheRevalidationAttemptRef.current = null
+      setIsCacheRevalidating(false)
+      setCacheRevalidationFailed(false)
+      return
+    }
+
+    const revalidationKey = `${lastSync || 'missing-last-sync'}|${hasNoStoredIssues ? 'empty' : 'has-data'}`
     if (cacheRevalidationAttemptRef.current === revalidationKey) {
       return
     }
@@ -1193,7 +1208,17 @@ export default function ContentApp({
       .finally(() => {
         setIsCacheRevalidating(false)
       })
-  }, [configuredDomains.length, isFocused, logPrefix, queryClient, refetchStoredIssues, storedIssuesData])
+  }, [
+    configuredDomains.length,
+    isConfigReady,
+    isFocused,
+    isStoredIssuesFetched,
+    isStoredIssuesLoading,
+    logPrefix,
+    queryClient,
+    refetchStoredIssues,
+    storedIssuesData,
+  ])
 
   // Process results: Sort by status and ensure linked issue is present
   const results = [...(data?.issues || [])].sort((a, b) => {
@@ -1209,7 +1234,13 @@ export default function ContentApp({
   const source = data?.source
   const isSuggestionMode = debouncedQuery.length < 2
   const cacheIsStale = isTaskCacheStale(storedIssuesData?.lastSync)
+  const hasNoStoredIssues = (storedIssuesData?.issues || []).length === 0
+  const cacheRevalidationKey = `${storedIssuesData?.lastSync || 'missing-last-sync'}|${hasNoStoredIssues ? 'empty' : 'has-data'}`
   const canAutoRevalidateCache = configuredDomains.length > 0
+  const shouldAutoRevalidateCache = canAutoRevalidateCache && isStoredIssuesFetched && (cacheIsStale || hasNoStoredIssues)
+  const isCacheRevalidationPending = shouldAutoRevalidateCache &&
+    cacheRevalidationAttemptRef.current !== cacheRevalidationKey &&
+    !cacheRevalidationFailed
 
   const suggestedIssues = useMemo(() => {
     const issues = storedIssuesData?.issues || []
@@ -1235,10 +1266,16 @@ export default function ContentApp({
   const visibleIssues = isSuggestionMode ? suggestedIssues : results
   const suggestionCacheMessage = useMemo(() => {
     if (!isSuggestionMode || visibleIssues.length > 0 || loading) return null
-    if (isCacheRevalidating || (canAutoRevalidateCache && cacheIsStale && !cacheRevalidationFailed)) {
+    if (!isConfigReady || isStoredIssuesLoading || !isStoredIssuesFetched) {
       return {
         tone: 'loading' as const,
-        message: 'Revalidating synced Jira task cache...',
+        message: 'Loading Jira task suggestions...',
+      }
+    }
+    if (isCacheRevalidating || isCacheRevalidationPending) {
+      return {
+        tone: 'loading' as const,
+        message: 'Syncing Jira tasks in background...',
       }
     }
     if (cacheRevalidationFailed) {
@@ -1249,14 +1286,16 @@ export default function ContentApp({
     }
     return {
       tone: 'empty' as const,
-      message: 'No synced Jira tasks yet. Run sync from the extension popup.',
+      message: 'No synced Jira tasks found.',
     }
   }, [
-    canAutoRevalidateCache,
-    cacheIsStale,
     cacheRevalidationFailed,
+    isCacheRevalidationPending,
     isCacheRevalidating,
+    isConfigReady,
     isSuggestionMode,
+    isStoredIssuesFetched,
+    isStoredIssuesLoading,
     loading,
     visibleIssues.length,
   ])
