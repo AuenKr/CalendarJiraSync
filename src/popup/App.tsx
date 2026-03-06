@@ -1,28 +1,39 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useConfigStore } from '../store/useConfigStore'
-import { syncData, getProjects, getStoredIssues, type JiraProject } from '../lib/jira'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search } from 'lucide-react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import Fuse from 'fuse.js'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, AlertTriangle } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Input } from '@/components/ui/input'
+import { getProjects, getStoredIssues, syncData, type JiraProject } from '@/lib/jira'
+import { useConfigStore } from '@/store/useConfigStore'
 
 function App() {
   const {
     isConfigured,
-    selectedProjectKeys,
+    jiraDomains,
     toggleProject,
-    projects: storedProjects,
-    setProjects,
+    projectsByDomain: storedProjectsByDomain,
+    setProjectsForDomain,
   } = useConfigStore()
+
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
+  const configuredDomains = jiraDomains.map(each => each.domain)
 
-  const { data: projects = [], isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
-    queryKey: ['projects'],
-    queryFn: getProjects,
+  const { data: projectsByDomain = {}, isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
+    queryKey: ['projects-by-domain', configuredDomains],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        configuredDomains.map(async (domain) => [domain, await getProjects(domain)] as const),
+      )
+
+      return Object.fromEntries(entries) as Record<string, JiraProject[]>
+    },
     enabled: configured,
     staleTime: 1000 * 60 * 60,
-    initialData: storedProjects.length > 0 ? storedProjects : undefined,
+    initialData: configured
+      ? Object.fromEntries(
+        configuredDomains.map(domain => [domain, storedProjectsByDomain[domain] || []]),
+      )
+      : undefined,
   })
 
   const { data: storedIssuesData, refetch: refetchStoredIssues } = useQuery({
@@ -33,28 +44,41 @@ function App() {
   })
 
   useEffect(() => {
-    if (projects.length > 0) {
-      setProjects(projects)
+    for (const [domain, projects] of Object.entries(projectsByDomain)) {
+      setProjectsForDomain(domain, projects)
     }
-  }, [projects, setProjects])
+  }, [projectsByDomain, setProjectsForDomain])
 
-  const filteredProjects = useMemo(() => {
-    if (!searchQuery) {
-      return [...projects].sort((a, b) => {
-        const aSelected = (selectedProjectKeys || []).includes(a.key)
-        const bSelected = (selectedProjectKeys || []).includes(b.key)
-        if (aSelected && !bSelected) return -1
-        if (!aSelected && bSelected) return 1
-        return a.name.localeCompare(b.name)
-      })
+  const filteredProjectsByDomain = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase()
+    const result: Record<string, JiraProject[]> = {}
+
+    for (const domainConfig of jiraDomains) {
+      const projects = projectsByDomain[domainConfig.domain] || []
+      const selectedSet = new Set(domainConfig.selectedProjectKeys)
+
+      const filtered = projects
+        .filter((project) => {
+          if (!normalizedQuery) return true
+          return project.name.toLowerCase().includes(normalizedQuery) || project.key.toLowerCase().includes(normalizedQuery)
+        })
+        .sort((a, b) => {
+          const aSelected = selectedSet.has(a.key)
+          const bSelected = selectedSet.has(b.key)
+          if (aSelected && !bSelected) return -1
+          if (!aSelected && bSelected) return 1
+          return a.name.localeCompare(b.name)
+        })
+
+      result[domainConfig.domain] = filtered
     }
 
-    const fuse = new Fuse(projects, {
-      keys: ['name', 'key'],
-      threshold: 0.3,
-    })
-    return fuse.search(searchQuery).map(r => r.item)
-  }, [searchQuery, projects, selectedProjectKeys])
+    return result
+  }, [jiraDomains, projectsByDomain, searchQuery])
+
+  const totalShownProjects = useMemo(() => {
+    return Object.values(filteredProjectsByDomain).reduce((sum, projects) => sum + projects.length, 0)
+  }, [filteredProjectsByDomain])
 
   const syncMutation = useMutation({
     mutationFn: syncData,
@@ -72,7 +96,7 @@ function App() {
   }
 
   return (
-    <div className="relative w-[22rem] overflow-hidden bg-[#f3efe8] p-4 text-[#1a2436] transition-colors dark:bg-[#111722] dark:text-[#e9edf6]">
+    <div className="relative w-[24rem] overflow-hidden bg-[#f3efe8] p-4 text-[#1a2436] transition-colors dark:bg-[#111722] dark:text-[#e9edf6]">
       <div className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-[#d7e4f8] blur-2xl dark:bg-[#1e3046]" />
       <div className="pointer-events-none absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-[#f7d7c1] blur-2xl dark:bg-[#3a2a24]" />
 
@@ -102,7 +126,7 @@ function App() {
                 </h2>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-[#f1ebe2] px-2 py-0.5 text-[10px] font-semibold text-[#5a6578] transition-colors dark:bg-[#1e293d] dark:text-[#a4b4cb]">
-                    {filteredProjects.length} shown
+                    {totalShownProjects} shown
                   </span>
                   <button
                     onClick={() => refetchProjects()}
@@ -125,37 +149,56 @@ function App() {
                 />
               </div>
 
-              {fetchingProjects && projects.length === 0 ? (
-                <div className="py-5 text-center text-xs text-[#677086] dark:text-[#90a0b7]">Loading projects...</div>
-              ) : filteredProjects.length > 0 ? (
-                <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                  {filteredProjects.map((project: JiraProject) => {
-                    const isSelected = (selectedProjectKeys || []).includes(project.key)
+              <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
+                {jiraDomains.map((domainConfig) => {
+                  const domain = domainConfig.domain
+                  const selectedSet = new Set(domainConfig.selectedProjectKeys)
+                  const projects = filteredProjectsByDomain[domain] || []
 
-                    return (
-                      <button
-                        key={project.id}
-                        onClick={() => toggleProject(project.key)}
-                        className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
-                          isSelected
-                            ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47] dark:border-[#3f6c8c] dark:bg-[#1d2f44] dark:text-[#dce5f2]'
-                            : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#c8d4e7] dark:hover:border-[#465778] dark:hover:bg-[#1a2333]'
-                        }`}
-                      >
-                        <span className="truncate text-left font-medium">{project.name}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378] dark:bg-[#1f2a3d] dark:text-[#a4b4cb]">{project.key}</span>
-                          {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c] dark:text-[#7eb6e3]" /> : <Square size={14} className="text-[#7b859a] dark:text-[#8594aa]" />}
+                  return (
+                    <div key={domain} className="rounded-xl border border-[#ddd4c8] bg-[#faf7f1] p-2 dark:border-[#34425b] dark:bg-[#121927]">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-[#5c687f] uppercase dark:text-[#9cafc8]">
+                          {domain}
+                        </span>
+                        <span className="text-[10px] text-[#6f7b92] dark:text-[#8fa1ba]">
+                          {selectedSet.size} selected
+                        </span>
+                      </div>
+
+                      {projects.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {projects.map((project: JiraProject) => {
+                            const isSelected = selectedSet.has(project.key)
+
+                            return (
+                              <button
+                                key={`${domain}-${project.key}`}
+                                onClick={() => toggleProject(domain, project.key)}
+                                className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
+                                  isSelected
+                                    ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47] dark:border-[#3f6c8c] dark:bg-[#1d2f44] dark:text-[#dce5f2]'
+                                    : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#c8d4e7] dark:hover:border-[#465778] dark:hover:bg-[#1a2333]'
+                                }`}
+                              >
+                                <span className="truncate text-left font-medium">{project.name}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378] dark:bg-[#1f2a3d] dark:text-[#a4b4cb]">{project.key}</span>
+                                  {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c] dark:text-[#7eb6e3]" /> : <Square size={14} className="text-[#7b859a] dark:text-[#8594aa]" />}
+                                </div>
+                              </button>
+                            )
+                          })}
                         </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-[#d6cec1] bg-[#f7f2ea] py-5 text-center text-xs text-[#677086] transition-colors dark:border-[#34425b] dark:bg-[#121927] dark:text-[#90a0b7]">
-                  No projects found
-                </div>
-              )}
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-[#d6cec1] bg-[#f7f2ea] py-3 text-center text-[11px] text-[#677086] dark:border-[#34425b] dark:bg-[#182235] dark:text-[#90a0b7]">
+                          No projects found
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </section>
 
             <section className="rounded-2xl border border-[#d6cec1] bg-white/90 p-3 transition-colors dark:border-[#2a3447] dark:bg-[#171e2b]/90">
@@ -170,6 +213,14 @@ function App() {
               <p className="mt-2 text-center text-[10px] text-[#677086] dark:text-[#90a0b7]">
                 Last task sync: {storedIssuesData?.lastSync ? new Date(storedIssuesData.lastSync).toLocaleString() : 'Never'}
               </p>
+              {syncMutation.data?.failedDomains && syncMutation.data.failedDomains.length > 0 && (
+                <p className="mt-2 rounded-lg border border-[#f0d5a2] bg-[#fff7e8] px-2 py-1.5 text-center text-xs text-[#9a6511] dark:border-[#5f4a2a] dark:bg-[#352a18] dark:text-[#f2c981]">
+                  <span className="inline-flex items-center gap-1">
+                    <AlertTriangle size={12} />
+                    Failed domains: {syncMutation.data.failedDomains.map(each => each.domain).join(', ')}
+                  </span>
+                </p>
+              )}
               {syncMutation.isSuccess && (
                 <p className="mt-2 rounded-lg border border-[#b9d9c3] bg-[#effaf2] px-2 py-1.5 text-center text-xs text-[#25623d] dark:border-[#2e5740] dark:bg-[#1d3127] dark:text-[#9dd2ad]">
                   Synced {syncMutation.data?.count} tasks
@@ -189,7 +240,7 @@ function App() {
             </div>
             <h2 className="mb-1 text-sm font-semibold text-[#253147] dark:text-[#dce5f2]">Setup required</h2>
             <p className="text-xs leading-5 text-[#657188] dark:text-[#90a0b7]">
-              Connect your Jira workspace once, then run quick syncs here whenever you need fresh tasks.
+              Connect Jira credentials and add one or more Jira domains in setup to enable sync.
             </p>
             <button
               onClick={openSetup}

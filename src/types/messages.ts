@@ -1,23 +1,19 @@
-import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
+import type { Issue, Project, Transition, Worklog } from 'jira.js/out/version3/models'
+import type { DomainSyncFailure, JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
 
-export interface GetIssuePayload {
-  issueKey: string
-}
+export type GetIssuePayload = JiraIssueRef
 
 export interface GetIssueResponse {
   issue: Issue
 }
 
-export interface GetTransitionsPayload {
-  issueKey: string
-}
+export type GetTransitionsPayload = JiraIssueRef
 
 export interface GetTransitionsResponse {
   transitions: Transition[]
 }
 
-export interface TransitionIssuePayload {
-  issueKey: string
+export interface TransitionIssuePayload extends JiraIssueRef {
   transitionId: string
 }
 
@@ -35,7 +31,18 @@ export interface ResetExtensionWorklogsByDateResponse {
   scannedIssues: number
 }
 
-export type MessageType = 
+export interface GetProjectsPayload {
+  domain: string
+  email?: string
+  apiToken?: string
+}
+
+export interface GetProjectsResponse {
+  domain: string
+  projects: Project[]
+}
+
+export type MessageType =
   | 'SEARCH_ISSUES'
   | 'ADD_WORKLOG'
   | 'UPDATE_WORKLOG'
@@ -59,51 +66,51 @@ export interface CalendarEvent {
 
 export interface FetchCalendarEventsResponse {
   events: CalendarEvent[]
-  date?: string // Today's date if detected
+  date?: string
 }
-
 
 export interface SyncDataResponse {
   success: boolean
   count: number
+  failedDomains?: DomainSyncFailure[]
 }
 
 export interface GetStoredIssuesResponse {
-  issues: Issue[]
+  issues: SyncedIssueRecord[]
   last_sync?: string
+  failed_domains?: DomainSyncFailure[]
 }
 
 export interface SearchIssuesPayload {
   query: string
+  domain?: string
 }
 
-export interface AddWorklogPayload {
-  issueKey: string
+export interface AddWorklogPayload extends JiraIssueRef {
   timeSpentSeconds: number
   started: string
   comment?: string
 }
 
-export interface UpdateWorklogPayload {
-  issueKey: string
+export interface UpdateWorklogPayload extends JiraIssueRef {
   worklogId: string
   timeSpentSeconds: number
   started?: string
   comment?: string
 }
 
-export interface DeleteWorklogPayload {
-  issueKey: string
+export interface DeleteWorklogPayload extends JiraIssueRef {
   worklogId: string
 }
 
 export interface MessageRequest {
   type: MessageType
-  payload: 
-    | SearchIssuesPayload 
-    | AddWorklogPayload 
-    | UpdateWorklogPayload 
-    | DeleteWorklogPayload 
+  payload:
+    | SearchIssuesPayload
+    | AddWorklogPayload
+    | UpdateWorklogPayload
+    | DeleteWorklogPayload
+    | GetProjectsPayload
     | GetIssuePayload
     | GetTransitionsPayload
     | TransitionIssuePayload
@@ -112,11 +119,9 @@ export interface MessageRequest {
 }
 
 export interface SearchIssuesResponse {
-  issues: Issue[]
+  issues: SyncedIssueRecord[]
 }
 
 export type AddWorklogResponse = Worklog
 export type UpdateWorklogResponse = Worklog
 export type DeleteWorklogResponse = void
-
-export type GetProjectsResponse = Project[]

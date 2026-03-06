@@ -1,9 +1,12 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink } from 'lucide-react'
+import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink, AlertTriangle, Settings } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraIssue, type JiraTransition } from '../lib/jira'
+import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
+import { formatIssueRefLabel, formatLinkedIssueTitle, issueRefEquals, parseLinkedIssueFromText, stripLinkedIssuePrefix } from '@/lib/jiraLink'
+import type { JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
+import { getStoredJiraConfig } from '@/lib/jiraConfig'
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -320,7 +323,7 @@ function findTitleElement(root: ParentNode, requireKey = false): HTMLElement | u
 
       const text = normalizeLinkedText(candidate.textContent || '')
       if (!text) continue
-      const hasKey = !!extractLinkedIssueKey(text)
+      const hasKey = !!extractIssueKeyLoose(text)
 
       if (!requireKey || hasKey) {
         return candidate
@@ -351,22 +354,9 @@ function findVisibleTitleInput(root: ParentNode): HTMLInputElement | null {
   return null
 }
 
-function extractLinkedIssueKey(value: string): string | null {
+function extractIssueKeyLoose(value: string): string | null {
   const match = normalizeLinkedText(value).match(LINKED_ISSUE_PATTERN)
   return match ? match[1] : null
-}
-
-function stripLinkedIssuePrefix(value: string): string {
-  return normalizeLinkedText(value).replace(/^\[?[A-Z][A-Z0-9]+-\d+\]?\s*/, '')
-}
-
-function normalizeJiraDomain(value: string): string {
-  return value
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/^www\./i, '')
-    .split('/')[0]
-    .replace(/\/$/, '')
 }
 
 function getJiraOriginFromIssueSelf(issueSelf?: string): string | null {
@@ -380,10 +370,13 @@ function getJiraOriginFromIssueSelf(issueSelf?: string): string | null {
 
 type KeySource = 'title-input' | 'heading' | 'data-text' | 'none'
 
-interface LinkedKeyResolution {
-  key: string | null
+interface LinkedRefResolution {
+  ref: JiraIssueRef | null
+  reason: 'ambiguous-key' | 'domain-not-configured' | null
   source: KeySource
   hasAnyText: boolean
+  issueKey?: string
+  requestedDomain?: string
 }
 
 function findTitleDataText(root: ParentNode): string {
@@ -396,7 +389,7 @@ function findTitleDataText(root: ParentNode): string {
 
     const dataText = normalizeLinkedText(node.getAttribute('data-text') || '')
     if (!dataText) continue
-    if (extractLinkedIssueKey(dataText)) return dataText
+    if (extractIssueKeyLoose(dataText)) return dataText
     if (!fallback) fallback = dataText
   }
 
@@ -419,45 +412,79 @@ export default function ContentApp({
   const [open, setOpen] = useState(false)
   const [forceApi, setForceApi] = useState(false)
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
-  const [linkedKey, setLinkedKey] = useState<string | null>(null)
+  const [linkedIssueRef, setLinkedIssueRef] = useState<JiraIssueRef | null>(null)
+  const [linkedIssueReason, setLinkedIssueReason] = useState<'ambiguous-key' | 'domain-not-configured' | null>(null)
+  const [linkedIssueRequestedDomain, setLinkedIssueRequestedDomain] = useState<string | null>(null)
+  const [linkedIssueHintKey, setLinkedIssueHintKey] = useState<string | null>(null)
+  const [configuredDomains, setConfiguredDomains] = useState<string[]>([])
   const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
-  const [jiraDomainFallback, setJiraDomainFallback] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
   const emptyResolutionCountRef = useRef(0)
   const issueSelectionInFlightRef = useRef(false)
+  const hasMultipleDomains = configuredDomains.length > 1
 
-  const resolveLinkedKey = useCallback((): LinkedKeyResolution => {
+  const resolveLinkedIssueRef = useCallback((): LinkedRefResolution => {
     const root = container || document
+
+    const parseCandidate = (candidate: string, source: KeySource): LinkedRefResolution | null => {
+      const normalized = normalizeLinkedText(candidate)
+      if (!normalized) return null
+
+      const parsed = parseLinkedIssueFromText(normalized, configuredDomains)
+      if (parsed.ref) {
+        return {
+          ref: parsed.ref,
+          reason: null,
+          source,
+          hasAnyText: true,
+        }
+      }
+
+      if (parsed.reason === 'ambiguous-key' || parsed.reason === 'domain-not-configured') {
+        return {
+          ref: null,
+          reason: parsed.reason,
+          source,
+          hasAnyText: true,
+          issueKey: parsed.issueKey,
+          requestedDomain: parsed.requestedDomain,
+        }
+      }
+
+      return null
+    }
+
     const hasUsableTitleInput = !!titleInput && titleInput.isConnected && isElementVisible(titleInput)
     const inputText = hasUsableTitleInput && titleInput ? normalizeLinkedText(titleInput.value) : ''
-    const inputKey = extractLinkedIssueKey(inputText)
-    if (inputKey) {
-      return { key: inputKey, source: 'title-input', hasAnyText: true }
+    const inputParsed = parseCandidate(inputText, 'title-input')
+    if (inputParsed) {
+      return inputParsed
     }
 
     const resolvedTitleEl = titleEl && titleEl.isConnected && isElementVisible(titleEl)
       ? titleEl
       : findTitleElement(root, true)
     const headingText = normalizeLinkedText(resolvedTitleEl?.textContent || '')
-    const headingKey = extractLinkedIssueKey(headingText)
-    if (headingKey) {
-      return { key: headingKey, source: 'heading', hasAnyText: true }
+    const headingParsed = parseCandidate(headingText, 'heading')
+    if (headingParsed) {
+      return headingParsed
     }
 
     const dataText = findTitleDataText(root)
-    const dataKey = extractLinkedIssueKey(dataText)
-    if (dataKey) {
-      return { key: dataKey, source: 'data-text', hasAnyText: true }
+    const dataParsed = parseCandidate(dataText, 'data-text')
+    if (dataParsed) {
+      return dataParsed
     }
 
     return {
-      key: null,
+      ref: null,
+      reason: null,
       source: 'none',
       hasAnyText: !!(inputText || headingText || dataText),
     }
-  }, [container, titleEl, titleInput])
+  }, [configuredDomains, container, titleEl, titleInput])
 
   useEffect(() => {
     console.log(`${logPrefix} Lifecycle: mounted`, {
@@ -557,21 +584,24 @@ export default function ContentApp({
     }
   }, [titleInput, titleElement, container])
 
-  // Extract linked key from input, heading, or title data attributes.
+  // Extract linked issue ref from input, heading, or title data attributes.
   useEffect(() => {
     const checkKey = () => {
-      const resolution = resolveLinkedKey()
-      setLinkedKey(prev => {
-        const next = resolution.key
-        if (next) {
+      const resolution = resolveLinkedIssueRef()
+
+      setLinkedIssueRef(prev => {
+        const next = resolution.ref
+        const hasLinkedSignal = !!next || resolution.reason !== null
+
+        if (hasLinkedSignal) {
           emptyResolutionCountRef.current = 0
         } else {
           emptyResolutionCountRef.current += 1
         }
 
-        if (!next && prev) {
+        if (!hasLinkedSignal && prev) {
           if (resolution.hasAnyText) {
-            // Keep prior key while Calendar is still mutating title nodes.
+            // Keep prior ref while Calendar is still mutating title nodes.
             return prev
           }
 
@@ -581,16 +611,21 @@ export default function ContentApp({
           }
         }
 
-        if (prev !== next) {
-          console.log(`${logPrefix} Step: linked key changed`, {
+        if (!issueRefEquals(prev, next)) {
+          console.log(`${logPrefix} Step: linked issue changed`, {
             previous: prev,
             next,
             source: resolution.source,
+            reason: resolution.reason,
             emptyResolutions: emptyResolutionCountRef.current,
           })
         }
         return next
       })
+
+      setLinkedIssueReason(resolution.reason)
+      setLinkedIssueHintKey(resolution.issueKey || null)
+      setLinkedIssueRequestedDomain(resolution.requestedDomain || null)
     }
 
     checkKey()
@@ -633,29 +668,32 @@ export default function ContentApp({
       clearInterval(poller)
       observer.disconnect()
     }
-  }, [container, resolveLinkedKey, titleEl, titleInput])
+  }, [container, logPrefix, resolveLinkedIssueRef, titleEl, titleInput])
+
+  const linkedKey = linkedIssueRef?.issueKey || linkedIssueHintKey
+  const linkedRefLabel = linkedIssueRef
+    ? formatIssueRefLabel(linkedIssueRef, configuredDomains.length)
+    : linkedIssueHintKey
 
   // Fetch linked issue details (status)
   const { data: linkedIssue, refetch: refetchLinkedIssue } = useQuery({
-    queryKey: ['issue', linkedKey],
-    queryFn: () => getIssue(linkedKey!),
-    enabled: !!linkedKey,
+    queryKey: ['issue', linkedIssueRef?.domain, linkedIssueRef?.issueKey],
+    queryFn: () => getIssue(linkedIssueRef!),
+    enabled: !!linkedIssueRef,
     staleTime: 1000 * 60 * 5,
   })
 
   const linkedIssueStatus = linkedIssue?.fields.status?.name
   const jiraBrowseUrl = useMemo(() => {
-    if (!linkedKey) return null
+    if (!linkedIssueRef) return null
 
     const issueOrigin = getJiraOriginFromIssueSelf(linkedIssue?.self)
     if (issueOrigin) {
-      return `${issueOrigin}/browse/${linkedKey}`
+      return `${issueOrigin}/browse/${linkedIssueRef.issueKey}`
     }
 
-    const normalizedDomain = jiraDomainFallback ? normalizeJiraDomain(jiraDomainFallback) : ''
-    if (!normalizedDomain) return null
-    return `https://${normalizedDomain}/browse/${linkedKey}`
-  }, [jiraDomainFallback, linkedIssue?.self, linkedKey])
+    return `https://${linkedIssueRef.domain}/browse/${linkedIssueRef.issueKey}`
+  }, [linkedIssue?.self, linkedIssueRef])
 
   const handleOpenJira = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -665,36 +703,30 @@ export default function ContentApp({
   }, [jiraBrowseUrl])
 
   useEffect(() => {
-    const loadJiraDomain = async () => {
+    const loadConfiguredDomains = async () => {
       try {
-        const storage = await chrome.storage.local.get('jira-sync-config')
-        const raw = storage['jira-sync-config']
-        if (!raw || typeof raw !== 'string') {
-          setJiraDomainFallback(null)
-          return
-        }
-
-        const parsed = JSON.parse(raw) as { state?: { jiraDomain?: string } }
-        const fallback = parsed?.state?.jiraDomain || null
-        setJiraDomainFallback(fallback)
+        const config = await getStoredJiraConfig()
+        setConfiguredDomains(config.jiraDomains.map(each => each.domain))
       } catch (e) {
-        console.warn(`${logPrefix} Failed to load Jira domain fallback`, e)
-        setJiraDomainFallback(null)
+        console.warn(`${logPrefix} Failed to load Jira config`, e)
+        setConfiguredDomains([])
       }
     }
 
-    loadJiraDomain()
+    loadConfiguredDomains()
   }, [logPrefix])
 
   useEffect(() => {
     console.log(`${logPrefix} State: status visibility snapshot`, {
       linkedKey,
+      linkedRef: linkedIssueRef,
+      linkedReason: linkedIssueReason,
       linkedIssueStatus,
       isBubbleView,
       hasTitleInput: !!titleInput,
       hasTitleElement: !!titleEl,
     })
-  }, [isBubbleView, linkedIssueStatus, linkedKey, titleEl, titleInput])
+  }, [isBubbleView, linkedIssueReason, linkedIssueRef, linkedIssueStatus, linkedKey, titleEl, titleInput])
 
   useEffect(() => {
     if (!isBubbleView || !linkedIssueStatus) return
@@ -722,27 +754,27 @@ export default function ContentApp({
 
   // Fetch transitions for linked issue
   const { data: transitions } = useQuery({
-    queryKey: ['transitions', linkedKey],
-    queryFn: () => getTransitions(linkedKey!),
-    enabled: !!linkedKey,
+    queryKey: ['transitions', linkedIssueRef?.domain, linkedIssueRef?.issueKey],
+    queryFn: () => getTransitions(linkedIssueRef!),
+    enabled: !!linkedIssueRef,
     staleTime: 1000 * 60 * 5,
   })
 
   // Transition mutation
   const transitionMutation = useMutation({
-    mutationFn: async ({ issueKey, transitionId }: { issueKey: string, transitionId: string }) => {
-      await transitionIssue(issueKey, transitionId)
+    mutationFn: async ({ issueRef, transitionId }: { issueRef: JiraIssueRef, transitionId: string }) => {
+      await transitionIssue(issueRef, transitionId)
     },
     onSuccess: () => {
       refetchLinkedIssue()
-      queryClient.invalidateQueries({ queryKey: ['transitions', linkedKey] })
+      queryClient.invalidateQueries({ queryKey: ['transitions', linkedIssueRef?.domain, linkedIssueRef?.issueKey] })
     }
   })
 
   // Search Queries
   const { data, isLoading: loading } = useQuery({
-    queryKey: ['issues', debouncedQuery, linkedKey, forceApi],
-    queryFn: () => searchIssues(debouncedQuery, linkedKey, forceApi),
+    queryKey: ['issues', debouncedQuery, linkedIssueRef?.domain, linkedIssueRef?.issueKey, forceApi],
+    queryFn: () => searchIssues(debouncedQuery, linkedIssueRef, forceApi),
     enabled: isFocused && debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
@@ -774,9 +806,13 @@ export default function ContentApp({
 
   // Process results: Sort by status and ensure linked issue is present
   const results = [...(data?.issues || [])].sort((a, b) => {
-    const pA = getStatusPriority(a.fields.status?.name)
-    const pB = getStatusPriority(b.fields.status?.name)
-    return pA - pB
+    const pA = getStatusPriority(a.issue.fields.status?.name)
+    const pB = getStatusPriority(b.issue.fields.status?.name)
+    if (pA !== pB) return pA - pB
+    if ((a.issue.key || '') !== (b.issue.key || '')) {
+      return (a.issue.key || '').localeCompare(b.issue.key || '')
+    }
+    return a.domain.localeCompare(b.domain)
   })
 
   const source = data?.source
@@ -785,14 +821,23 @@ export default function ContentApp({
   const suggestedIssues = useMemo(() => {
     const issues = storedIssuesData?.issues || []
     return [...issues]
-      .filter(issue => issue.key !== linkedKey)
-      .sort((a, b) => {
-        const pA = getStatusPriority(a.fields.status?.name)
-        const pB = getStatusPriority(b.fields.status?.name)
-        if (pA !== pB) return pA - pB
-        return a.key.localeCompare(b.key)
+      .filter(issue => {
+        if (!linkedIssueRef) return true
+        return !issueRefEquals(
+          linkedIssueRef,
+          { domain: issue.domain, issueKey: issue.issue.key || '' },
+        )
       })
-  }, [storedIssuesData?.issues, linkedKey])
+      .sort((a, b) => {
+        const pA = getStatusPriority(a.issue.fields.status?.name)
+        const pB = getStatusPriority(b.issue.fields.status?.name)
+        if (pA !== pB) return pA - pB
+        if ((a.issue.key || '') !== (b.issue.key || '')) {
+          return (a.issue.key || '').localeCompare(b.issue.key || '')
+        }
+        return a.domain.localeCompare(b.domain)
+      })
+  }, [linkedIssueRef, storedIssuesData?.issues])
 
   const visibleIssues = isSuggestionMode ? suggestedIssues : results
 
@@ -883,10 +928,20 @@ export default function ContentApp({
     }
   }, [isSuggestionMode, results.length, loading, source, open, isFocused])
 
-  const handleSelect = async (issue: JiraIssue) => {
+  const handleSelect = async (issue: SyncedIssueRecord) => {
     if (issueSelectionInFlightRef.current) return
     issueSelectionInFlightRef.current = true
-    console.log(`${logPrefix} Step: user selected issue`, { key: issue.key })
+    const issueKey = issue.issue.key
+    if (!issueKey) {
+      issueSelectionInFlightRef.current = false
+      return
+    }
+
+    console.log(`${logPrefix} Step: user selected issue`, {
+      domain: issue.domain,
+      key: issueKey,
+    })
+
     try {
       setQuery('')
       setForceApi(false)
@@ -895,7 +950,13 @@ export default function ContentApp({
 
       // Update Google Calendar Title
       const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
-      const newTitle = `[${issue.key}] ${issue.fields.summary}`
+      const observedDomainCount = new Set((storedIssuesData?.issues || []).map(each => each.domain)).size
+      const domainCountForFormatting = Math.max(configuredDomains.length, observedDomainCount, 1)
+      const newTitle = formatLinkedIssueTitle(
+        { domain: issue.domain, issueKey },
+        issue.issue.fields.summary,
+        domainCountForFormatting,
+      )
 
       if (input) {
         // Focus first to simulate user interaction
@@ -945,7 +1006,7 @@ export default function ContentApp({
 
   return (
     <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
-      {linkedKey && (
+      {linkedIssueRef && (
         <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
           <div className="inline-flex items-center gap-2">
             <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
@@ -986,7 +1047,7 @@ export default function ContentApp({
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      transitionMutation.mutate({ issueKey: linkedKey, transitionId: t.id })
+                      transitionMutation.mutate({ issueRef: linkedIssueRef, transitionId: t.id })
                     }}
                     className={cn(
                       'w-full text-left px-2.5 py-2 text-[13px] rounded-lg flex items-center justify-between transition-colors',
@@ -1007,6 +1068,11 @@ export default function ContentApp({
                 )}
               </PopoverContent>
             </Popover>
+            {hasMultipleDomains && (
+              <span className="rounded-full border border-[#d4dae6] bg-[#f7f8fb] px-2 py-0.5 text-[10px] font-semibold text-[#596579] dark:border-[#4b5568] dark:bg-[#2d3440] dark:text-[#c7d2e4]">
+                {linkedIssueRef.domain}
+              </span>
+            )}
           </div>
           {jiraBrowseUrl && (
             <button
@@ -1024,6 +1090,32 @@ export default function ContentApp({
               <ExternalLink className={cn(isBubbleView ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
             </button>
           )}
+        </div>
+      )}
+
+      {linkedIssueReason === 'ambiguous-key' && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-[#f0d5a2] bg-[#fff7e8] px-3 py-1.5 text-xs text-[#9a6511] dark:border-[#5f4a2a] dark:bg-[#352a18] dark:text-[#f2c981]">
+          <AlertTriangle size={12} />
+          <span>
+            Jira link {linkedRefLabel ? `(${linkedRefLabel}) ` : ''}is ambiguous across configured domains. Re-select task.
+          </span>
+        </div>
+      )}
+
+      {linkedIssueReason === 'domain-not-configured' && (
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-[#e4bbb2] bg-[#fff0ee] px-3 py-1.5 text-xs text-[#9e2f24] dark:border-[#5d3134] dark:bg-[#3a2328] dark:text-[#f0a8a1]">
+          <span className="inline-flex items-center gap-2">
+            <AlertTriangle size={12} />
+            Linked domain {linkedIssueRequestedDomain ? `"${linkedIssueRequestedDomain}"` : ''} is no longer configured.
+          </span>
+          <button
+            type="button"
+            onClick={() => window.open(chrome.runtime.getURL('setup.html'), '_blank', 'noopener,noreferrer')}
+            className="inline-flex items-center gap-1 rounded-md border border-current px-2 py-0.5 text-[10px] font-semibold"
+          >
+            <Settings size={11} />
+            Setup
+          </button>
         </div>
       )}
 
@@ -1073,7 +1165,7 @@ export default function ContentApp({
             {visibleIssues.map(issue => (
               <button
                 type="button"
-                key={issue.id}
+                key={`${issue.domain}-${issue.issue.id || issue.issue.key}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -1086,19 +1178,26 @@ export default function ContentApp({
                 className="w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground text-sm border-b border-border last:border-0 transition-colors group"
               >
                 <div className="flex items-center justify-between">
-                  <div className="font-medium text-foreground">{issue.key}</div>
-                  {issue.fields.status && (
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium text-foreground">{issue.issue.key}</div>
+                    {hasMultipleDomains && (
+                      <span className="rounded border border-[#d5dbe7] bg-[#f8f9fc] px-1.5 py-0.5 text-[10px] text-[#5a667a] dark:border-[#4b5568] dark:bg-[#2d3440] dark:text-[#c8d3e6]">
+                        {issue.domain}
+                      </span>
+                    )}
+                  </div>
+                  {issue.issue.fields.status && (
                     <span className={cn(
                       "text-[10px] px-1.5 py-0.5 rounded border",
-                      issue.fields.status.name === 'In Progress' ? "bg-blue-50 text-blue-600 border-blue-100" :
-                        issue.fields.status.name === 'Done' ? "bg-green-50 text-green-600 border-green-100" :
+                      issue.issue.fields.status.name === 'In Progress' ? "bg-blue-50 text-blue-600 border-blue-100" :
+                        issue.issue.fields.status.name === 'Done' ? "bg-green-50 text-green-600 border-green-100" :
                           "bg-gray-50 text-gray-500 border-gray-100"
                     )}>
-                      {issue.fields.status.name}
+                      {issue.issue.fields.status.name}
                     </span>
                   )}
                 </div>
-                <div className="text-muted-foreground truncate">{issue.fields.summary}</div>
+                <div className="text-muted-foreground truncate">{issue.issue.fields.summary}</div>
               </button>
             ))}
 

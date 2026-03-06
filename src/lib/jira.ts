@@ -1,5 +1,5 @@
 import Fuse from 'fuse.js'
-import type { Issue, Project, Worklog, Transition } from 'jira.js/out/version3/models'
+import type { Issue, Project, Transition, Worklog } from 'jira.js/out/version3/models'
 import type {
   MessageType,
   SearchIssuesPayload,
@@ -7,6 +7,7 @@ import type {
   UpdateWorklogPayload,
   DeleteWorklogPayload,
   DeleteWorklogResponse,
+  GetProjectsPayload,
   GetProjectsResponse,
   SyncDataResponse,
   SearchIssuesResponse,
@@ -22,8 +23,10 @@ import type {
   ResetExtensionWorklogsByDatePayload,
   ResetExtensionWorklogsByDateResponse,
 } from '../types/messages'
+import type { DomainSyncFailure, JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
+import { issueRefKey } from '@/lib/jiraLink'
+import { normalizeJiraDomain } from '@/lib/jiraConfig'
 
-// Re-export types for UI components
 export type JiraIssue = Issue
 export type JiraProject = Project
 export type JiraWorklog = Worklog
@@ -31,15 +34,17 @@ export type JiraTransition = Transition
 
 export interface SearchResult {
   source: 'local' | 'api'
-  issues: JiraIssue[]
+  issues: SyncedIssueRecord[]
 }
 
 export interface StoredIssuesResult {
-  issues: JiraIssue[]
+  issues: SyncedIssueRecord[]
   lastSync?: string
+  failedDomains?: DomainSyncFailure[]
 }
 
-// Helper to send message to background script
+export type SyncDataResult = SyncDataResponse
+
 const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise<T> => {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type, payload }, (response) => {
@@ -54,7 +59,16 @@ const sendToBackground = async <T>(type: MessageType, payload: unknown): Promise
   })
 }
 
-const TASK_CACHE_TTL_MS = 30 * 60 * 1000 // 30 minutes
+function recordKey(record: SyncedIssueRecord): string {
+  const issueKey = record.issue.key || ''
+  return `${normalizeJiraDomain(record.domain)}|${issueKey}`
+}
+
+function matchesRef(record: SyncedIssueRecord, ref: JiraIssueRef): boolean {
+  return record.issue.key === ref.issueKey && normalizeJiraDomain(record.domain) === normalizeJiraDomain(ref.domain)
+}
+
+const TASK_CACHE_TTL_MS = 30 * 60 * 1000
 let inFlightTaskCacheRefresh: Promise<SyncDataResponse> | null = null
 
 export function isTaskCacheStale(lastSync?: string): boolean {
@@ -82,44 +96,55 @@ export async function refreshTaskCacheIfStale(lastSync?: string, force = false):
   return await inFlightTaskCacheRefresh
 }
 
-const searchIssuesFromApi = async (query: string, linkedTaskId: string | null, linkedTask: Issue[]): Promise<SearchResult> => {
+const searchIssuesFromApi = async (
+  query: string,
+  linkedTaskRef: JiraIssueRef | null,
+  linkedTask: SyncedIssueRecord[],
+): Promise<SearchResult> => {
   const payload: SearchIssuesPayload = { query }
   const data = await sendToBackground<SearchIssuesResponse>('SEARCH_ISSUES', payload)
 
   let resolvedLinkedTask = linkedTask
-  let apiIssues = data.issues
-  if (resolvedLinkedTask.length === 0 && linkedTaskId) {
-    const foundInApi = apiIssues.find(i => i.key === linkedTaskId)
+  let apiIssues = data.issues || []
+
+  if (resolvedLinkedTask.length === 0 && linkedTaskRef) {
+    const foundInApi = apiIssues.find(i => matchesRef(i, linkedTaskRef))
     if (foundInApi) {
       resolvedLinkedTask = [foundInApi]
     }
   }
 
-  // Filter linked task out of API results so we don't show it twice
-  apiIssues = apiIssues.filter(each => each.key !== linkedTaskId)
+  if (linkedTaskRef) {
+    apiIssues = apiIssues.filter(each => !matchesRef(each, linkedTaskRef))
+  }
+
+  const deduped = new Map<string, SyncedIssueRecord>()
+  for (const item of [...resolvedLinkedTask, ...apiIssues]) {
+    deduped.set(recordKey(item), item)
+  }
+
   return {
     source: 'api',
-    issues: [...resolvedLinkedTask, ...apiIssues],
+    issues: Array.from(deduped.values()),
   }
 }
 
-export const searchIssues = async (query: string, linkedTaskId: string | null, forceApi = false): Promise<SearchResult> => {
+export const searchIssues = async (query: string, linkedTaskRef: JiraIssueRef | null, forceApi = false): Promise<SearchResult> => {
   const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
-  // GetLinkedTask
-  let linkedTask: Issue[] = []
-  if (linkedTaskId) {
-    const found = stored.issues.find(i => i.key === linkedTaskId)
+
+  let linkedTask: SyncedIssueRecord[] = []
+  if (linkedTaskRef) {
+    const found = (stored.issues || []).find(i => matchesRef(i, linkedTaskRef))
     if (found) {
       linkedTask = [found]
     }
   }
 
-  // Search local cache first unless explicitly forcing API search
   if (!forceApi) {
     try {
       if (stored.issues && stored.issues.length > 0) {
         const fuse = new Fuse(stored.issues, {
-          keys: ['key', 'fields.summary'],
+          keys: ['issue.key', 'issue.fields.summary', 'domain'],
           threshold: 0.3,
           distance: 100,
         })
@@ -127,18 +152,22 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
         const results = fuse.search(query)
         const searchResult = results
           .map(r => r.item)
-          .filter(item => item.key !== linkedTaskId)
+          .filter(item => !linkedTaskRef || !matchesRef(item, linkedTaskRef))
+
         if (searchResult.length > 0) {
-          return { source: 'local', issues: [...linkedTask, ...searchResult] }
+          const deduped = new Map<string, SyncedIssueRecord>()
+          for (const item of [...linkedTask, ...searchResult]) {
+            deduped.set(recordKey(item), item)
+          }
+          return { source: 'local', issues: Array.from(deduped.values()) }
         }
       }
 
-      // No local match: automatically fallback to Jira API search.
-      return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
+      return await searchIssuesFromApi(query, linkedTaskRef, linkedTask)
     } catch (e) {
       console.warn('Local search failed', e)
       try {
-        return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
+        return await searchIssuesFromApi(query, linkedTaskRef, linkedTask)
       } catch (apiError) {
         console.warn('API search failed after local search failure', apiError)
         return { source: 'local', issues: linkedTask }
@@ -146,11 +175,11 @@ export const searchIssues = async (query: string, linkedTaskId: string | null, f
     }
   }
 
-  return await searchIssuesFromApi(query, linkedTaskId, linkedTask)
+  return await searchIssuesFromApi(query, linkedTaskRef, linkedTask)
 }
 
-export const syncData = async (): Promise<SyncDataResponse> => {
-  return await sendToBackground<SyncDataResponse>('SYNC_DATA', {})
+export const syncData = async (): Promise<SyncDataResult> => {
+  return await sendToBackground<SyncDataResult>('SYNC_DATA', {})
 }
 
 export const getStoredIssues = async (): Promise<StoredIssuesResult> => {
@@ -158,54 +187,76 @@ export const getStoredIssues = async (): Promise<StoredIssuesResult> => {
   return {
     issues: data.issues || [],
     lastSync: data.last_sync,
+    failedDomains: data.failed_domains,
   }
 }
 
-export const addWorklog = async (issueKey: string, timeSpentSeconds: number, started: string, comment?: string): Promise<JiraWorklog> => {
-  const payload: AddWorklogPayload = { issueKey, timeSpentSeconds, started, comment }
+export const addWorklog = async (
+  issueRef: JiraIssueRef,
+  timeSpentSeconds: number,
+  started: string,
+  comment?: string,
+): Promise<JiraWorklog> => {
+  const payload: AddWorklogPayload = { ...issueRef, timeSpentSeconds, started, comment }
   return await sendToBackground<AddWorklogResponse>('ADD_WORKLOG', payload)
 }
 
-export const updateWorklog = async (issueKey: string, worklogId: string, timeSpentSeconds: number, started?: string, comment?: string): Promise<JiraWorklog> => {
-  const payload: UpdateWorklogPayload = { issueKey, worklogId, timeSpentSeconds, started, comment }
+export const updateWorklog = async (
+  issueRef: JiraIssueRef,
+  worklogId: string,
+  timeSpentSeconds: number,
+  started?: string,
+  comment?: string,
+): Promise<JiraWorklog> => {
+  const payload: UpdateWorklogPayload = { ...issueRef, worklogId, timeSpentSeconds, started, comment }
   return await sendToBackground<UpdateWorklogResponse>('UPDATE_WORKLOG', payload)
 }
 
-export const deleteWorklog = async (issueKey: string, worklogId: string): Promise<void> => {
-  const payload: DeleteWorklogPayload = { issueKey, worklogId }
+export const deleteWorklog = async (issueRef: JiraIssueRef, worklogId: string): Promise<void> => {
+  const payload: DeleteWorklogPayload = { ...issueRef, worklogId }
   return await sendToBackground<DeleteWorklogResponse>('DELETE_WORKLOG', payload)
 }
 
-export const getProjects = async (): Promise<JiraProject[]> => {
-  return await sendToBackground<GetProjectsResponse>('GET_PROJECTS', {})
+export const getProjects = async (
+  domain: string,
+  credentials?: { email: string; apiToken: string },
+): Promise<JiraProject[]> => {
+  const payload: GetProjectsPayload = {
+    domain,
+    email: credentials?.email,
+    apiToken: credentials?.apiToken,
+  }
+  const response = await sendToBackground<GetProjectsResponse>('GET_PROJECTS', payload)
+  return response.projects || []
 }
 
-export const getIssue = async (issueKey: string): Promise<JiraIssue> => {
-  // Try to find in local cache first
+export const getIssue = async (issueRef: JiraIssueRef): Promise<JiraIssue> => {
   try {
     const stored = await sendToBackground<GetStoredIssuesResponse>('GET_STORED_ISSUES', {})
-    const cachedIssue = stored.issues.find(i => i.key === issueKey)
+    const cachedIssue = (stored.issues || []).find(i => issueRefKey({
+      domain: i.domain,
+      issueKey: i.issue.key || '',
+    }) === issueRefKey(issueRef))
     if (cachedIssue) {
-      // console.log('[Jira Sync] Found issue in local cache', issueKey)
-      return cachedIssue
+      return cachedIssue.issue
     }
   } catch (e) {
     console.warn('Failed to check local cache for issue', e)
   }
 
-  const payload: GetIssuePayload = { issueKey }
+  const payload: GetIssuePayload = issueRef
   const response = await sendToBackground<GetIssueResponse>('GET_ISSUE', payload)
   return response.issue
 }
 
-export const getTransitions = async (issueKey: string): Promise<JiraTransition[]> => {
-  const payload: GetTransitionsPayload = { issueKey }
+export const getTransitions = async (issueRef: JiraIssueRef): Promise<JiraTransition[]> => {
+  const payload: GetTransitionsPayload = issueRef
   const response = await sendToBackground<GetTransitionsResponse>('GET_TRANSITIONS', payload)
   return response.transitions
 }
 
-export const transitionIssue = async (issueKey: string, transitionId: string): Promise<void> => {
-  const payload: TransitionIssuePayload = { issueKey, transitionId }
+export const transitionIssue = async (issueRef: JiraIssueRef, transitionId: string): Promise<void> => {
+  const payload: TransitionIssuePayload = { ...issueRef, transitionId }
   await sendToBackground<TransitionIssueResponse>('TRANSITION_ISSUE', payload)
 }
 

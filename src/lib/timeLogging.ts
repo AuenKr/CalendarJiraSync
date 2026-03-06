@@ -1,13 +1,16 @@
 import type { ResetExtensionWorklogsByDateResponse, CalendarEvent } from '@/types/messages'
 import { addWorklog, resetExtensionWorklogsByDate } from '@/lib/jira'
 import { buildWorklogComment, createExtensionWorklogMetadata } from '@/lib/worklogMetadata'
+import { getStoredJiraConfig, hasConfiguredJiraDomains } from '@/lib/jiraConfig'
+import { parseLinkedIssueFromText } from '@/lib/jiraLink'
+import type { JiraIssueRef } from '@/types/jira'
 
 export interface LogTimeRunInput {
   date: string
   lastLoggedTime?: string | null
   fetchEvents: () => Promise<CalendarEvent[]>
   fetchDescription?: (eventId: string) => Promise<string | undefined>
-  addWorklogFn?: (issueKey: string, timeSpentSeconds: number, started: string, comment?: string) => Promise<unknown>
+  addWorklogFn?: (issueRef: JiraIssueRef, timeSpentSeconds: number, started: string, comment?: string) => Promise<unknown>
   now?: Date
 }
 
@@ -15,6 +18,7 @@ export interface LogTimeRunResult {
   loggedCount: number
   errors: number
   eligibleCount: number
+  ambiguousCount: number
   message: string
   isError: boolean
   newLastLoggedTime?: string
@@ -23,12 +27,6 @@ export interface LogTimeRunResult {
 export interface ResetRunResult extends ResetExtensionWorklogsByDateResponse {
   message: string
   isError: boolean
-}
-
-interface JiraConfig {
-  jiraDomain?: string
-  email?: string
-  apiToken?: string
 }
 
 export function isValidLogDate(date: string): boolean {
@@ -60,26 +58,19 @@ function getOverlapWindow(startTime: Date, endTime: Date, date: string) {
   return { overlapStart, overlapEnd }
 }
 
-async function getStoredConfig(): Promise<JiraConfig> {
-  if (typeof chrome === 'undefined' || !chrome.storage?.local) {
-    return {}
-  }
-
-  const storage = await chrome.storage.local.get('jira-sync-config')
-  const raw = storage['jira-sync-config']
-  if (!raw) return {}
-
-  try {
-    const parsed = JSON.parse(raw as string)
-    return (parsed.state || parsed) as JiraConfig
-  } catch {
-    return {}
-  }
+async function getConfiguredDomains(): Promise<string[]> {
+  const config = await getStoredJiraConfig()
+  return config.jiraDomains.map(each => each.domain)
 }
 
 async function isJiraConfigured(): Promise<boolean> {
-  const config = await getStoredConfig()
-  return !!(config.jiraDomain && config.email && config.apiToken)
+  const config = await getStoredJiraConfig()
+  return hasConfiguredJiraDomains(config)
+}
+
+interface EligibleEvent {
+  event: CalendarEvent
+  issueRef: JiraIssueRef
 }
 
 export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTimeRunResult> {
@@ -97,6 +88,7 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
       loggedCount: 0,
       errors: 0,
       eligibleCount: 0,
+      ambiguousCount: 0,
       message: 'Please select a valid date',
       isError: true,
     }
@@ -109,11 +101,13 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
       loggedCount: 0,
       errors: 0,
       eligibleCount: 0,
+      ambiguousCount: 0,
       message: 'No events found',
       isError: false,
     }
   }
 
+  const configuredDomains = await getConfiguredDomains()
   const lastLoggedDate = lastLoggedTime ? new Date(lastLoggedTime) : null
   const uniqueEvents = new Map<string, CalendarEvent>()
 
@@ -132,11 +126,17 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
   }
 
   const processedEvents = Array.from(uniqueEvents.values())
-  const eligibleEvents: CalendarEvent[] = []
+  const eligibleEvents: EligibleEvent[] = []
+  let ambiguousCount = 0
 
   for (const event of processedEvents) {
-    const match = event.title.match(/\[([A-Z][A-Z0-9]+-\d+)\]/)
-    if (!match?.[1]) continue
+    const parsedLink = parseLinkedIssueFromText(event.title, configuredDomains)
+    if (!parsedLink.ref) {
+      if (parsedLink.reason === 'ambiguous-key') {
+        ambiguousCount++
+      }
+      continue
+    }
 
     const startTime = new Date(event.startTime)
     const endTime = new Date(event.endTime)
@@ -152,17 +152,17 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
     if (durationSeconds <= 0) continue
 
-    eligibleEvents.push(event)
+    eligibleEvents.push({
+      event,
+      issueRef: parsedLink.ref,
+    })
   }
 
   let loggedCount = 0
   let errors = 0
 
-  for (const event of eligibleEvents) {
-    const match = event.title.match(/\[([A-Z][A-Z0-9]+-\d+)\]/)
-    if (!match?.[1]) continue
-
-    const issueKey = match[1]
+  for (const eligible of eligibleEvents) {
+    const { event, issueRef } = eligible
     const startTime = new Date(event.startTime)
     const endTime = new Date(event.endTime)
     const overlap = getOverlapWindow(startTime, endTime, date)
@@ -184,29 +184,41 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
       })
 
       const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
-      await addWorklogFn(issueKey, durationSeconds, jiraStarted, comment)
+      await addWorklogFn(issueRef, durationSeconds, jiraStarted, comment)
       loggedCount++
     } catch (e) {
-      console.error(`[Jira Sync] Failed to log worklog for ${issueKey}`, e)
+      console.error(`[Jira Sync] Failed to log worklog for ${issueRef.domain}|${issueRef.issueKey}`, e)
       errors++
     }
   }
 
   if (loggedCount === 0 && errors === 0) {
+    const ambiguitySuffix = ambiguousCount > 0
+      ? ` (${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'} require relink)`
+      : ''
+
     return {
       loggedCount,
       errors,
       eligibleCount: eligibleEvents.length,
-      message: 'No new completed tasks found to log',
+      ambiguousCount,
+      message: `No new completed tasks found to log${ambiguitySuffix}`,
       isError: false,
     }
   }
+
+  let message = `Logged ${loggedCount} event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}`
+  if (ambiguousCount > 0) {
+    message += `, skipped ${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'}`
+  }
+  message += '!'
 
   return {
     loggedCount,
     errors,
     eligibleCount: eligibleEvents.length,
-    message: `Logged ${loggedCount} Event${loggedCount !== 1 ? 's' : ''}${errors > 0 ? `, ${errors} failed` : ''}!`,
+    ambiguousCount,
+    message,
     isError: errors > 0,
     newLastLoggedTime: loggedCount > 0 ? now.toISOString() : undefined,
   }
@@ -219,6 +231,7 @@ export async function logTimeForDateInPage(input: LogTimeRunInput): Promise<LogT
       loggedCount: 0,
       errors: 0,
       eligibleCount: 0,
+      ambiguousCount: 0,
       message: 'Please configure Jira in extension settings',
       isError: true,
     }
