@@ -410,8 +410,16 @@ function injectApp(modal: Element) {
     }
 
     if (target && target.parentElement) {
-      // console.log('[Calendar Jira Sync] Injecting after target', target)
-      target.insertAdjacentElement('afterend', host)
+      // In full edit, title row is often a flex container. Injecting after the title input
+      // block can place our warning inline with the title text. Move below the row instead.
+      const parentDisplay = window.getComputedStyle(target.parentElement).display
+      const shouldInjectBelowTitleRow = isEventEditView && parentDisplay.includes('flex')
+
+      if (shouldInjectBelowTitleRow && target.parentElement.parentElement) {
+        target.parentElement.insertAdjacentElement('afterend', host)
+      } else {
+        target.insertAdjacentElement('afterend', host)
+      }
       injected = true
     } else if (titleInput.parentElement) {
       // console.log('[Calendar Jira Sync] Fallback: Injecting after title input parent')

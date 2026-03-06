@@ -29,6 +29,7 @@ export interface ResetExtensionWorklogsByDateResponse {
   deletedCount: number
   matchedCount: number
   scannedIssues: number
+  failedDomains?: DomainSyncFailure[]
 }
 
 export interface GetProjectsPayload {

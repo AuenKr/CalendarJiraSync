@@ -314,6 +314,33 @@ export async function resetWorklogsForDate(date: string): Promise<ResetRunResult
   try {
     console.log('[Jira Sync][ResetWorklogs] Start reset run', { date })
     const result = await resetExtensionWorklogsByDate(date)
+    const failedDomains = result.failedDomains || []
+
+    if (failedDomains.length > 0) {
+      const failedSummary = failedDomains.map(each => each.domain).join(', ')
+      console.error('[Jira Sync][ResetWorklogs] Partial reset failure', {
+        date,
+        failedDomains,
+        deletedCount: result.deletedCount,
+        matchedCount: result.matchedCount,
+        scannedIssues: result.scannedIssues,
+      })
+
+      if (result.matchedCount === 0) {
+        return {
+          ...result,
+          message: `Failed to reset worklogs for: ${failedSummary}`,
+          isError: true,
+        }
+      }
+
+      return {
+        ...result,
+        message: `Deleted ${result.deletedCount}/${result.matchedCount} extension worklog${result.matchedCount !== 1 ? 's' : ''}. Failed domains: ${failedSummary}`,
+        isError: true,
+      }
+    }
+
     if (result.matchedCount === 0) {
       console.log('[Jira Sync][ResetWorklogs] No extension worklogs found', {
         date,

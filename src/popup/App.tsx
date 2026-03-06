@@ -20,23 +20,50 @@ function App() {
   const hasMultipleDomains = jiraDomains.length > 1
   const singleDomain = jiraDomains[0]?.domain || ''
 
-  const { data: projectsByDomain = {}, isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
+  const { data: projectsQueryData, isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
     queryKey: ['projects-by-domain', configuredDomains],
     queryFn: async () => {
-      const entries = await Promise.all(
+      const settled = await Promise.allSettled(
         configuredDomains.map(async (domain) => [domain, await getProjects(domain)] as const),
       )
 
-      return Object.fromEntries(entries) as Record<string, JiraProject[]>
+      const projectsByDomain: Record<string, JiraProject[]> = {}
+      const failedDomains: string[] = []
+
+      for (let i = 0; i < settled.length; i++) {
+        const result = settled[i]
+        const domain = configuredDomains[i]
+        if (result.status === 'fulfilled') {
+          const [resolvedDomain, projects] = result.value
+          projectsByDomain[resolvedDomain] = projects
+          continue
+        }
+
+        failedDomains.push(domain)
+        projectsByDomain[domain] = storedProjectsByDomain[domain] || []
+      }
+
+      return { projectsByDomain, failedDomains }
     },
     enabled: configured,
     staleTime: 1000 * 60 * 60,
     initialData: configured
-      ? Object.fromEntries(
-        configuredDomains.map(domain => [domain, storedProjectsByDomain[domain] || []]),
-      )
+      ? {
+        projectsByDomain: Object.fromEntries(
+          configuredDomains.map(domain => [domain, storedProjectsByDomain[domain] || []]),
+        ),
+        failedDomains: [],
+      }
       : undefined,
   })
+  const projectsByDomain = useMemo(
+    () => projectsQueryData?.projectsByDomain || {},
+    [projectsQueryData?.projectsByDomain],
+  )
+  const failedProjectDomains = useMemo(
+    () => projectsQueryData?.failedDomains || [],
+    [projectsQueryData?.failedDomains],
+  )
 
   const { data: storedIssuesData, refetch: refetchStoredIssues } = useQuery({
     queryKey: ['stored-issues-meta'],
@@ -150,6 +177,11 @@ function App() {
                   className="h-8 border-[#d7cebf] bg-[#faf7f1] pl-8 text-xs placeholder:text-[#8b91a0] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#e7edf8] dark:placeholder:text-[#76849b]"
                 />
               </div>
+              {failedProjectDomains.length > 0 && (
+                <p className="mb-2 rounded-lg border border-[#f0d5a2] bg-[#fff7e8] px-2 py-1.5 text-[11px] text-[#9a6511] dark:border-[#5f4a2a] dark:bg-[#352a18] dark:text-[#f2c981]">
+                  Failed to load projects for: {failedProjectDomains.join(', ')}
+                </p>
+              )}
 
               <p className="mb-1 text-[10px] font-semibold tracking-[0.08em] text-[#5c687f] uppercase dark:text-[#9cafc8]">
                 {hasMultipleDomains ? 'All spaces by instance' : 'All spaces'}

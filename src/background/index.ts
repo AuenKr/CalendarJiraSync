@@ -587,6 +587,7 @@ async function handleMessage(request: MessageRequest) {
       let deletedCount = 0
       let matchedCount = 0
       let scannedIssues = 0
+      const failedDomains: DomainSyncFailure[] = []
 
       for (let i = 0; i < settled.length; i++) {
         const result = settled[i]
@@ -598,10 +599,14 @@ async function handleMessage(request: MessageRequest) {
           continue
         }
 
+        failedDomains.push({
+          domain,
+          error: result.reason instanceof Error ? result.reason.message : 'Unknown reset error',
+        })
         console.error(`[Jira Sync] Failed to reset worklogs for domain ${domain}`, result.reason)
       }
 
-      return { deletedCount, matchedCount, scannedIssues }
+      return { deletedCount, matchedCount, scannedIssues, failedDomains }
     }
 
     case 'SYNC_DATA':
