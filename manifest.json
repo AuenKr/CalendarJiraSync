@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Calendar Jira Sync",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "Sync Jira tasks with Google Calendar",
   "permissions": [
     "storage"
