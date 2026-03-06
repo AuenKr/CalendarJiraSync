@@ -1,7 +1,7 @@
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink, AlertTriangle, Settings } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
 import { formatIssueRefLabel, formatLinkedIssueTitle, issueRefEquals, parseLinkedIssueFromText, stripLinkedIssuePrefix } from '@/lib/jiraLink'
@@ -259,6 +259,149 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+interface SuggestionAnchorRect {
+  left: number
+  top: number
+  side: 'left' | 'right'
+  panelWidth: number
+}
+
+const HIDDEN_SUGGESTION_ANCHOR_STYLE: CSSProperties = {
+  position: 'fixed',
+  left: -9999,
+  top: -9999,
+  width: 1,
+  height: 1,
+  pointerEvents: 'none',
+}
+
+function sameSuggestionAnchorRect(
+  current: SuggestionAnchorRect | null,
+  next: SuggestionAnchorRect,
+): boolean {
+  if (!current) return false
+  return (
+    current.left === next.left &&
+    current.top === next.top &&
+    current.side === next.side &&
+    current.panelWidth === next.panelWidth
+  )
+}
+
+function nearSuggestionAnchorRect(
+  current: SuggestionAnchorRect | null,
+  next: SuggestionAnchorRect,
+): boolean {
+  if (!current) return false
+  return (
+    current.side === next.side &&
+    Math.abs(current.left - next.left) <= SUGGESTION_POSITION_SNAP_PX &&
+    Math.abs(current.top - next.top) <= SUGGESTION_POSITION_SNAP_PX &&
+    Math.abs(current.panelWidth - next.panelWidth) <= SUGGESTION_WIDTH_SNAP_PX
+  )
+}
+
+const SUGGESTION_PANEL_WIDTH = 400
+const SUGGESTION_PANEL_MIN_WIDTH = 260
+const SUGGESTION_PANEL_SIDE_OFFSET = 0
+const SUGGESTION_PANEL_VIEWPORT_MARGIN = 12
+const SUGGESTION_SIDE_SWITCH_HYSTERESIS_PX = 80
+const SUGGESTION_POSITION_SNAP_PX = 2
+const SUGGESTION_WIDTH_SNAP_PX = 8
+const SUGGESTION_PANEL_MAX_ANCHOR_WIDTH = 980
+const SUGGESTION_PANEL_MIN_ANCHOR_HEIGHT = 180
+const SUGGESTION_ANCHOR_SETTLE_MS = 120
+const SUGGESTION_ANCHOR_MAX_WAIT_MS = 300
+
+function stabilizeSuggestionAnchorRect(
+  previous: SuggestionAnchorRect | null,
+  next: SuggestionAnchorRect,
+): SuggestionAnchorRect {
+  if (!previous) return next
+
+  const left = Math.abs(next.left - previous.left) <= SUGGESTION_POSITION_SNAP_PX
+    ? previous.left
+    : next.left
+  const top = Math.abs(next.top - previous.top) <= SUGGESTION_POSITION_SNAP_PX
+    ? previous.top
+    : next.top
+  const panelWidth = Math.abs(next.panelWidth - previous.panelWidth) <= SUGGESTION_WIDTH_SNAP_PX
+    ? previous.panelWidth
+    : next.panelWidth
+
+  return {
+    ...next,
+    left,
+    top,
+    panelWidth,
+  }
+}
+
+function isFullEditLayout(): boolean {
+  return window.location.pathname.includes('/eventedit') || document.body.getAttribute('data-viewfamily') === 'EVENT_EDIT'
+}
+
+function resolveSuggestionPanelRect(
+  anchorElement: HTMLElement | null,
+  container?: HTMLElement,
+): DOMRect | null {
+  const maxUsableWidth = Math.min(
+    Math.round(window.innerWidth * 0.9),
+    Math.max(SUGGESTION_PANEL_MAX_ANCHOR_WIDTH, 1280),
+  )
+
+  const resolveFromElement = (element: HTMLElement): DOMRect | null => {
+    if (!element.isConnected || !isElementVisible(element)) return null
+
+    const anchorRect = element.getBoundingClientRect()
+    const minWidthFromAnchor = Math.max(Math.round(anchorRect.width * 0.45), 280)
+
+    let node: HTMLElement | null = element.parentElement
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (node.isConnected && isElementVisible(node)) {
+        const rect = node.getBoundingClientRect()
+        const isUsableWidth = rect.width >= minWidthFromAnchor && rect.width <= maxUsableWidth
+        const isUsableHeight = rect.height >= SUGGESTION_PANEL_MIN_ANCHOR_HEIGHT
+        if (isUsableWidth && isUsableHeight) {
+          return rect
+        }
+      }
+
+      if (container && node === container) break
+      node = node.parentElement
+    }
+
+    if (isFullEditLayout() && anchorRect.width > 0) {
+      const fallbackWidth = Math.min(
+        maxUsableWidth,
+        Math.max(Math.round(anchorRect.width + 120), SUGGESTION_PANEL_MIN_WIDTH),
+      )
+      return new DOMRect(
+        Math.round(anchorRect.left),
+        Math.round(anchorRect.top),
+        Math.round(fallbackWidth),
+        SUGGESTION_PANEL_MIN_ANCHOR_HEIGHT,
+      )
+    }
+
+    return null
+  }
+
+  if (anchorElement) {
+    const resolved = resolveFromElement(anchorElement)
+    if (resolved) return resolved
+  }
+
+  if (container && container.isConnected && isElementVisible(container)) {
+    const rect = container.getBoundingClientRect()
+    if (rect.width > 0 && rect.width <= maxUsableWidth && rect.height >= SUGGESTION_PANEL_MIN_ANCHOR_HEIGHT) {
+      return rect
+    }
+  }
+
+  return null
+}
+
 async function resolveDescriptionEditor(roots: ParentNode[]): Promise<{ editor: DescriptionEditor | null, openControlFound: boolean }> {
   const existing = getDescriptionEditor(roots)
   if (existing) {
@@ -418,12 +561,86 @@ export default function ContentApp({
   const [linkedIssueHintKey, setLinkedIssueHintKey] = useState<string | null>(null)
   const [configuredDomains, setConfiguredDomains] = useState<string[]>([])
   const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
+  const [isCacheRevalidating, setIsCacheRevalidating] = useState(false)
+  const [cacheRevalidationFailed, setCacheRevalidationFailed] = useState(false)
+  const [suggestionAnchorRect, setSuggestionAnchorRect] = useState<SuggestionAnchorRect | null>(null)
+  const [isSuggestionAnchorSettled, setIsSuggestionAnchorSettled] = useState(false)
   const queryClient = useQueryClient()
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
+  const isFullEditView = isFullEditLayout()
   const emptyResolutionCountRef = useRef(0)
   const issueSelectionInFlightRef = useRef(false)
+  const cacheRevalidationAttemptRef = useRef<string | null>(null)
+  const suggestionAnchorRectRef = useRef<SuggestionAnchorRect | null>(null)
+  const suggestionAnchorCandidateRef = useRef<SuggestionAnchorRect | null>(null)
+  const suggestionAnchorStableSinceRef = useRef<number>(0)
+  const suggestionAnchorFirstSeenAtRef = useRef<number>(0)
+  const suggestionAnchorForcedSettledRef = useRef(false)
+  const fullEditAnchorLogKeyRef = useRef('')
+  const fullEditPopoverLogKeyRef = useRef('')
   const hasMultipleDomains = configuredDomains.length > 1
+
+  useEffect(() => {
+    suggestionAnchorRectRef.current = suggestionAnchorRect
+  }, [suggestionAnchorRect])
+
+  const commitSuggestionAnchorRect = useCallback((next: SuggestionAnchorRect | null) => {
+    if (!next) {
+      suggestionAnchorCandidateRef.current = null
+      suggestionAnchorStableSinceRef.current = 0
+      suggestionAnchorFirstSeenAtRef.current = 0
+      suggestionAnchorForcedSettledRef.current = false
+      setIsSuggestionAnchorSettled(false)
+      setSuggestionAnchorRect(previous => previous ? null : previous)
+      return
+    }
+
+    const now = Date.now()
+    if (!suggestionAnchorFirstSeenAtRef.current) {
+      suggestionAnchorFirstSeenAtRef.current = now
+    }
+
+    const previousCandidate = suggestionAnchorCandidateRef.current
+    if (!previousCandidate || !nearSuggestionAnchorRect(previousCandidate, next)) {
+      suggestionAnchorCandidateRef.current = next
+      suggestionAnchorStableSinceRef.current = now
+      setIsSuggestionAnchorSettled(false)
+    }
+
+    const isStableEnough = suggestionAnchorStableSinceRef.current > 0 &&
+      now - suggestionAnchorStableSinceRef.current >= SUGGESTION_ANCHOR_SETTLE_MS
+    const forceAfterMaxWait = suggestionAnchorFirstSeenAtRef.current > 0 &&
+      now - suggestionAnchorFirstSeenAtRef.current >= SUGGESTION_ANCHOR_MAX_WAIT_MS
+
+    if (isStableEnough || forceAfterMaxWait) {
+      setIsSuggestionAnchorSettled(true)
+      if (forceAfterMaxWait && !suggestionAnchorForcedSettledRef.current && isFullEditLayout()) {
+        suggestionAnchorForcedSettledRef.current = true
+        console.log(`${logPrefix} [FullEditAnchor] settle-forced`, {
+          waitMs: now - suggestionAnchorFirstSeenAtRef.current,
+          stableForMs: suggestionAnchorStableSinceRef.current > 0
+            ? now - suggestionAnchorStableSinceRef.current
+            : 0,
+        })
+      }
+    } else {
+      suggestionAnchorForcedSettledRef.current = false
+    }
+
+    setSuggestionAnchorRect((previous) => {
+      const stabilized = stabilizeSuggestionAnchorRect(previous, next)
+      return sameSuggestionAnchorRect(previous, stabilized) ? previous : stabilized
+    })
+  }, [])
+
+  const logFullEditAnchor = useCallback((reason: string, details: Record<string, unknown>) => {
+    if (!isFullEditLayout()) return
+    const key = `${reason}|${JSON.stringify(details)}`
+    if (key === fullEditAnchorLogKeyRef.current) return
+    fullEditAnchorLogKeyRef.current = key
+    console.log(`${logPrefix} [FullEditAnchor] ${reason}`, details)
+  }, [logPrefix])
 
   const resolveLinkedIssueRef = useCallback((): LinkedRefResolution => {
     const root = container || document
@@ -716,6 +933,157 @@ export default function ContentApp({
     loadConfiguredDomains()
   }, [logPrefix])
 
+  const updateSuggestionAnchorRect = useCallback(() => {
+    const root = container || document
+    const activeTitleInput = titleInput && titleInput.isConnected && isElementVisible(titleInput)
+      ? titleInput
+      : findVisibleTitleInput(root)
+    const activeTitleElement = titleEl && titleEl.isConnected && isElementVisible(titleEl)
+      ? titleEl
+      : null
+    const anchorElement = activeTitleInput || activeTitleElement
+    const panelRect = resolveSuggestionPanelRect(anchorElement, container)
+    const fullEdit = isFullEditLayout()
+
+    if (activeTitleInput && activeTitleInput !== titleInput) {
+      setTitleInput(activeTitleInput)
+      if (fullEdit) {
+        logFullEditAnchor('input-rebound', {
+          activeElement: document.activeElement?.tagName?.toLowerCase() || 'none',
+        })
+      }
+    }
+
+    const titleFocused = !!activeTitleInput && document.activeElement === activeTitleInput
+    if (titleFocused !== isFocused) {
+      setIsFocused(titleFocused)
+      if (fullEdit) {
+        logFullEditAnchor('focus-sync', {
+          titleFocused,
+          activeElement: document.activeElement?.tagName?.toLowerCase() || 'none',
+        })
+      }
+    }
+
+    if (panelRect) {
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const spaceRight = Math.max(0, viewportWidth - panelRect.right - SUGGESTION_PANEL_VIEWPORT_MARGIN)
+      const spaceLeft = Math.max(0, panelRect.left - SUGGESTION_PANEL_VIEWPORT_MARGIN)
+      const previous = suggestionAnchorRectRef.current
+      const preferredSide: 'left' | 'right' = spaceRight >= spaceLeft ? 'right' : 'left'
+      const side = previous && previous.side !== preferredSide && Math.abs(spaceRight - spaceLeft) < SUGGESTION_SIDE_SWITCH_HYSTERESIS_PX
+        ? previous.side
+        : preferredSide
+      const availableWidth = side === 'right' ? spaceRight : spaceLeft
+      const panelWidth = Math.max(
+        SUGGESTION_PANEL_MIN_WIDTH,
+        Math.min(
+          SUGGESTION_PANEL_WIDTH,
+          Math.floor(availableWidth - SUGGESTION_PANEL_SIDE_OFFSET),
+        ),
+      )
+      const anchorRect = anchorElement?.getBoundingClientRect()
+      const preferredTop = anchorRect
+        ? (fullEdit ? anchorRect.bottom + 10 : anchorRect.top)
+        : panelRect.top + (fullEdit ? 44 : 16)
+      const anchorTop = Math.max(
+        SUGGESTION_PANEL_VIEWPORT_MARGIN,
+        Math.min(
+          Math.round(preferredTop),
+          viewportHeight - SUGGESTION_PANEL_VIEWPORT_MARGIN,
+        ),
+      )
+      const nextAnchorRect: SuggestionAnchorRect = {
+        left: Math.round(side === 'right' ? panelRect.right : panelRect.left),
+        top: anchorTop,
+        side,
+        panelWidth,
+      }
+      if (fullEdit) {
+        const anchorRect = anchorElement?.getBoundingClientRect() || null
+        logFullEditAnchor('anchor-resolved', {
+          hasTitleInput: !!activeTitleInput,
+          hasTitleElement: !!activeTitleElement,
+          anchorRect: anchorRect
+            ? {
+              left: Math.round(anchorRect.left),
+              top: Math.round(anchorRect.top),
+              width: Math.round(anchorRect.width),
+              height: Math.round(anchorRect.height),
+            }
+            : null,
+          panelRect: {
+            left: Math.round(panelRect.left),
+            top: Math.round(panelRect.top),
+            width: Math.round(panelRect.width),
+            height: Math.round(panelRect.height),
+          },
+          computed: nextAnchorRect,
+          settled: isSuggestionAnchorSettled,
+        })
+      }
+      commitSuggestionAnchorRect(nextAnchorRect)
+      return
+    }
+
+    if (fullEdit) {
+      const anchorRect = anchorElement?.getBoundingClientRect() || null
+      const containerRect = container?.getBoundingClientRect() || null
+      logFullEditAnchor('panel-unresolved', {
+        hasTitleInput: !!activeTitleInput,
+        hasTitleElement: !!activeTitleElement,
+        anchorRect: anchorRect
+          ? {
+            left: Math.round(anchorRect.left),
+            top: Math.round(anchorRect.top),
+            width: Math.round(anchorRect.width),
+            height: Math.round(anchorRect.height),
+          }
+          : null,
+        containerRect: containerRect
+          ? {
+            left: Math.round(containerRect.left),
+            top: Math.round(containerRect.top),
+            width: Math.round(containerRect.width),
+            height: Math.round(containerRect.height),
+          }
+          : null,
+      })
+    }
+
+    commitSuggestionAnchorRect(null)
+  }, [commitSuggestionAnchorRect, container, isFocused, isSuggestionAnchorSettled, logFullEditAnchor, titleEl, titleInput])
+
+  useEffect(() => {
+    let frameId = 0
+    const scheduleAnchorUpdate = () => {
+      if (frameId) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0
+        updateSuggestionAnchorRect()
+      })
+    }
+
+    scheduleAnchorUpdate()
+    window.addEventListener('resize', scheduleAnchorUpdate)
+    window.addEventListener('scroll', scheduleAnchorUpdate, true)
+    const periodicUpdate = window.setInterval(() => {
+      if (isFocused || open || !isSuggestionAnchorSettled) {
+        scheduleAnchorUpdate()
+      }
+    }, 300)
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId)
+      }
+      window.clearInterval(periodicUpdate)
+      window.removeEventListener('resize', scheduleAnchorUpdate)
+      window.removeEventListener('scroll', scheduleAnchorUpdate, true)
+    }
+  }, [isFocused, isSuggestionAnchorSettled, open, updateSuggestionAnchorRect])
+
   useEffect(() => {
     console.log(`${logPrefix} State: status visibility snapshot`, {
       linkedKey,
@@ -787,22 +1155,45 @@ export default function ContentApp({
   })
 
   useEffect(() => {
-    if (!isFocused) return
+    if (!isFocused) {
+      cacheRevalidationAttemptRef.current = null
+      setIsCacheRevalidating(false)
+      return
+    }
     if (!storedIssuesData) return
+    if (configuredDomains.length === 0) return
 
     const lastSync = storedIssuesData.lastSync
-    if (!isTaskCacheStale(lastSync)) return
+    if (!isTaskCacheStale(lastSync)) {
+      cacheRevalidationAttemptRef.current = null
+      setIsCacheRevalidating(false)
+      setCacheRevalidationFailed(false)
+      return
+    }
 
-    refreshTaskCacheIfStale(lastSync)
-      .then((result) => {
+    const revalidationKey = lastSync || 'missing-last-sync'
+    if (cacheRevalidationAttemptRef.current === revalidationKey) {
+      return
+    }
+
+    cacheRevalidationAttemptRef.current = revalidationKey
+    setIsCacheRevalidating(true)
+    setCacheRevalidationFailed(false)
+
+    refreshTaskCacheIfStale(lastSync, true)
+      .then(async (result) => {
         if (!result) return
-        void refetchStoredIssues()
-        void queryClient.invalidateQueries({ queryKey: ['issues'] })
+        await refetchStoredIssues()
+        await queryClient.invalidateQueries({ queryKey: ['issues'] })
       })
       .catch((e) => {
+        setCacheRevalidationFailed(true)
         console.error(`${logPrefix} Failed to refresh stale task cache`, e)
       })
-  }, [isFocused, logPrefix, queryClient, refetchStoredIssues, storedIssuesData])
+      .finally(() => {
+        setIsCacheRevalidating(false)
+      })
+  }, [configuredDomains.length, isFocused, logPrefix, queryClient, refetchStoredIssues, storedIssuesData])
 
   // Process results: Sort by status and ensure linked issue is present
   const results = [...(data?.issues || [])].sort((a, b) => {
@@ -817,6 +1208,8 @@ export default function ContentApp({
 
   const source = data?.source
   const isSuggestionMode = debouncedQuery.length < 2
+  const cacheIsStale = isTaskCacheStale(storedIssuesData?.lastSync)
+  const canAutoRevalidateCache = configuredDomains.length > 0
 
   const suggestedIssues = useMemo(() => {
     const issues = storedIssuesData?.issues || []
@@ -840,6 +1233,46 @@ export default function ContentApp({
   }, [linkedIssueRef, storedIssuesData?.issues])
 
   const visibleIssues = isSuggestionMode ? suggestedIssues : results
+  const suggestionCacheMessage = useMemo(() => {
+    if (!isSuggestionMode || visibleIssues.length > 0 || loading) return null
+    if (isCacheRevalidating || (canAutoRevalidateCache && cacheIsStale && !cacheRevalidationFailed)) {
+      return {
+        tone: 'loading' as const,
+        message: 'Revalidating synced Jira task cache...',
+      }
+    }
+    if (cacheRevalidationFailed) {
+      return {
+        tone: 'error' as const,
+        message: 'Failed to revalidate task cache. Try syncing from extension popup.',
+      }
+    }
+    return {
+      tone: 'empty' as const,
+      message: 'No synced Jira tasks yet. Run sync from the extension popup.',
+    }
+  }, [
+    canAutoRevalidateCache,
+    cacheIsStale,
+    cacheRevalidationFailed,
+    isCacheRevalidating,
+    isSuggestionMode,
+    loading,
+    visibleIssues.length,
+  ])
+
+  const suggestionAnchorStyle = useMemo<CSSProperties>(() => {
+    if (!suggestionAnchorRect) return HIDDEN_SUGGESTION_ANCHOR_STYLE
+    return {
+      position: 'fixed',
+      left: suggestionAnchorRect.left,
+      top: suggestionAnchorRect.top,
+      width: 1,
+      height: 1,
+      pointerEvents: 'none',
+    }
+  }, [suggestionAnchorRect])
+  const isSuggestionAnchorReady = !!suggestionAnchorRect && isSuggestionAnchorSettled
 
   // Listen to input changes for search
   useEffect(() => {
@@ -894,39 +1327,67 @@ export default function ContentApp({
 
   // Open popover when we have results or when searching
   useEffect(() => {
-    const updateOpen = (newState: boolean) => {
-      if (open !== newState) {
-        setTimeout(() => setOpen(newState), 0)
+    let nextOpen = false
+    let openReason = 'idle'
+    const anchorReadyForOpen = isSuggestionAnchorReady || (open && !!suggestionAnchorRect)
+
+    if (!isFocused) {
+      nextOpen = false
+      openReason = 'not-focused'
+    } else if (!anchorReadyForOpen) {
+      nextOpen = false
+      openReason = 'anchor-not-ready'
+    } else if (isSuggestionMode) {
+      nextOpen = true
+      openReason = 'suggestion-mode'
+    } else if (results.length > 0) {
+      nextOpen = true
+      openReason = 'results-available'
+    } else if (loading) {
+      nextOpen = true
+      openReason = 'loading'
+    } else if (source === 'local') {
+      nextOpen = true
+      openReason = 'local-empty'
+    } else if (source === 'api' && results.length === 0) {
+      nextOpen = true
+      openReason = 'api-empty'
+    }
+
+    if (isFullEditLayout()) {
+      const snapshot = {
+        reason: openReason,
+        nextOpen,
+        anchorReadyForOpen,
+        isFocused,
+        hasAnchor: !!suggestionAnchorRect,
+        settled: isSuggestionAnchorSettled,
+        queryLength: debouncedQuery.length,
+        source,
+        loading,
+        results: results.length,
+      }
+      const key = JSON.stringify(snapshot)
+      if (key !== fullEditPopoverLogKeyRef.current) {
+        fullEditPopoverLogKeyRef.current = key
+        console.log(`${logPrefix} [FullEditAnchor] popover-gate`, snapshot)
       }
     }
 
-    if (!isFocused) {
-      updateOpen(false)
-      return
-    }
-
-    if (isSuggestionMode) {
-      updateOpen(true)
-      return
-    }
-
-    // If we have results, open
-    if (results.length > 0) {
-      updateOpen(true)
-    }
-    // If we are loading, open
-    else if (loading) {
-      updateOpen(true)
-    }
-    // If we have no results but haven't searched API yet (source is local), open to show "Search in Jira"
-    else if (source === 'local') {
-      updateOpen(true)
-    }
-    // If we searched API and found nothing, close (or show "No results"?)
-    else if (source === 'api' && results.length === 0) {
-      updateOpen(true)
-    }
-  }, [isSuggestionMode, results.length, loading, source, open, isFocused])
+    setOpen(prev => prev === nextOpen ? prev : nextOpen)
+  }, [
+    debouncedQuery.length,
+    isFocused,
+    open,
+    isSuggestionAnchorReady,
+    isSuggestionAnchorSettled,
+    isSuggestionMode,
+    loading,
+    logPrefix,
+    results.length,
+    source,
+    suggestionAnchorRect,
+  ])
 
   const handleSelect = async (issue: SyncedIssueRecord) => {
     if (issueSelectionInFlightRef.current) return
@@ -1006,7 +1467,7 @@ export default function ContentApp({
 
   return (
     <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
-      {linkedIssueRef && (
+      {linkedIssueRef && !isFullEditView && (
         <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
           <div className="inline-flex items-center gap-2">
             <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
@@ -1126,15 +1587,17 @@ export default function ContentApp({
       )}
 
       <Popover open={open} onOpenChange={setOpen}>
-        {/* Invisible trigger that we control programmatically via open state */}
-        <PopoverTrigger asChild>
-          <div className="w-full h-0" />
-        </PopoverTrigger>
+        <PopoverAnchor asChild>
+          <div aria-hidden="true" style={suggestionAnchorStyle} />
+        </PopoverAnchor>
         <PopoverContent
-          className="z-[2147483647] w-100 p-0 border-border"
+          className="z-[2147483647] p-0 border-border data-[state=open]:animate-none data-[state=closed]:animate-none"
           align="start"
-          side="bottom"
-          sideOffset={10}
+          side={suggestionAnchorRect?.side || 'right'}
+          sideOffset={SUGGESTION_PANEL_SIDE_OFFSET}
+          style={{
+            width: suggestionAnchorRect?.panelWidth || SUGGESTION_PANEL_WIDTH,
+          }}
           onOpenAutoFocus={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
@@ -1156,9 +1619,20 @@ export default function ContentApp({
               <div className="p-2 text-xs text-muted-foreground text-center">No issues found in Jira</div>
             )}
 
-            {!loading && isSuggestionMode && visibleIssues.length === 0 && (
-              <div className="p-2 text-xs text-muted-foreground text-center">
-                No synced Jira tasks yet. Run sync from the extension popup.
+            {!loading && suggestionCacheMessage && (
+              <div
+                className={cn(
+                  'p-2 text-xs text-center',
+                  suggestionCacheMessage.tone === 'error' ? 'text-[#9e2f24] dark:text-[#f0a8a1]' : 'text-muted-foreground',
+                )}
+              >
+                {suggestionCacheMessage.tone === 'loading' && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>{suggestionCacheMessage.message}</span>
+                  </span>
+                )}
+                {suggestionCacheMessage.tone !== 'loading' && suggestionCacheMessage.message}
               </div>
             )}
 

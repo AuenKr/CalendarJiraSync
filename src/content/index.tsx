@@ -723,11 +723,18 @@ function ensureMountOnActiveContainers() {
     pathname: window.location.pathname,
   })
 
+  const hasStableActiveMount = !!(activeContentMount && activeContentMount.host.isConnected && activeContentMount.ownerModal)
+
   for (const candidate of candidates) {
     if (!(candidate instanceof Element)) continue
+    if (hasStableActiveMount && candidate !== activeContentMount?.ownerModal) continue
     const style = window.getComputedStyle(candidate as HTMLElement)
     if (style.display === 'none' || style.visibility === 'hidden') continue
     if (candidate.querySelector(`#${MOUNT_POINT_ID}`)) continue
+    const hasTitleTarget = !!candidate.querySelector(
+      '#xTiIn, input[aria-label="Add title"], input[aria-label="Title"], [role="heading"], .JAPzS, .gUD7Lf',
+    )
+    if (!hasTitleTarget) continue
     injectApp(candidate)
   }
 
