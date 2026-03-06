@@ -205,33 +205,31 @@ function App() {
       <div className="pointer-events-none absolute -right-24 -top-16 h-64 w-64 rounded-full bg-[#d9e7ff] blur-3xl dark:bg-[#1e3046]" />
       <div className="pointer-events-none absolute -left-20 bottom-10 h-56 w-56 rounded-full bg-[#f9d9c4] blur-3xl dark:bg-[#3a2a24]" />
 
-      <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-6 lg:grid lg:grid-cols-[1.1fr,1fr]">
-        <section className="rounded-[2rem] border border-[#d8d0c4] bg-[#fbf8f2]/95 p-7 shadow-[0_20px_60px_-35px_rgba(20,27,39,0.45)] transition-colors dark:border-[#2a3447] dark:bg-[#171e2b]/95 dark:shadow-[0_20px_60px_-35px_rgba(0,0,0,0.9)] sm:p-10">
-          <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#d5ccbf] bg-[#f2ece3] px-3 py-1 text-xs font-semibold tracking-[0.15em] text-[#475066] uppercase transition-colors dark:border-[#2d384d] dark:bg-[#1c2433] dark:text-[#9fb2cd]">
+      <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-4 lg:grid lg:grid-cols-[0.8fr,1.2fr] lg:items-start">
+        <section className="rounded-[1.5rem] border border-[#d8d0c4] bg-[#fbf8f2]/95 p-5 shadow-[0_20px_60px_-35px_rgba(20,27,39,0.45)] transition-colors dark:border-[#2a3447] dark:bg-[#171e2b]/95 dark:shadow-[0_20px_60px_-35px_rgba(0,0,0,0.9)] sm:p-6">
+          <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#d5ccbf] bg-[#f2ece3] px-3 py-1 text-xs font-semibold tracking-[0.15em] text-[#475066] uppercase transition-colors dark:border-[#2d384d] dark:bg-[#1c2433] dark:text-[#9fb2cd]">
             <Sparkles size={12} />
             Setup
           </p>
-          <h1 className="mb-4 text-4xl leading-tight [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',serif]">
-            Configure Jira sync
-            <br />
-            across domains.
+          <h1 className="mb-2 text-2xl leading-tight [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',serif] sm:text-3xl">
+            Configure Jira sync once.
           </h1>
-          <p className="max-w-xl text-sm leading-6 text-[#455066] [font-family:'Avenir_Next','Segoe_UI','Helvetica_Neue',sans-serif] dark:text-[#acb9cc]">
-            Add one or more Jira domains using the same account token, choose project scope per domain, and sync tasks in one flow.
+          <p className="text-sm leading-6 text-[#455066] [font-family:'Avenir_Next','Segoe_UI','Helvetica_Neue',sans-serif] dark:text-[#acb9cc]">
+            Connect credentials, choose project scope, and start syncing.
           </p>
 
-          <div className="mt-8 grid gap-3 text-sm text-[#2a3448] dark:text-[#d4deeb] sm:grid-cols-2">
-            <div className="rounded-2xl border border-[#ddd4c8] bg-[#f7f2ea] p-4 transition-colors dark:border-[#2f3b51] dark:bg-[#1c2434]">
+          <div className="mt-5 grid gap-2 text-sm text-[#2a3448] dark:text-[#d4deeb]">
+            <div className="rounded-xl border border-[#ddd4c8] bg-[#f7f2ea] p-3 transition-colors dark:border-[#2f3b51] dark:bg-[#1c2434]">
               <p className="mb-1 font-semibold">Step 1</p>
-              <p className="text-[#5f6778] dark:text-[#9eacc1]">Connect credentials and validate each domain.</p>
+              <p className="text-xs text-[#5f6778] dark:text-[#9eacc1]">Connect credentials and validate each domain.</p>
             </div>
-            <div className="rounded-2xl border border-[#ddd4c8] bg-[#f7f2ea] p-4 transition-colors dark:border-[#2f3b51] dark:bg-[#1c2434]">
+            <div className="rounded-xl border border-[#ddd4c8] bg-[#f7f2ea] p-3 transition-colors dark:border-[#2f3b51] dark:bg-[#1c2434]">
               <p className="mb-1 font-semibold">Step 2</p>
-              <p className="text-[#5f6778] dark:text-[#9eacc1]">Pick projects for every domain and sync.</p>
+              <p className="text-xs text-[#5f6778] dark:text-[#9eacc1]">Pick projects for every domain and sync.</p>
             </div>
           </div>
 
-          <div className="mt-8 flex items-start gap-3 rounded-2xl border border-[#d6cec1] bg-white/80 p-4 text-sm text-[#475066] transition-colors dark:border-[#2c394f] dark:bg-[#1a2333]/80 dark:text-[#acb9cc]">
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#d6cec1] bg-white/80 p-3 text-xs text-[#475066] transition-colors dark:border-[#2c394f] dark:bg-[#1a2333]/80 dark:text-[#acb9cc]">
             <ShieldCheck className="mt-0.5 text-[#1d5d8c] dark:text-[#7eb6e3]" size={18} />
             <p>Credentials are saved in extension storage and reused securely across configured Jira domains.</p>
           </div>
@@ -322,6 +320,9 @@ function App() {
                   className="w-full rounded-xl border border-[#d7cebf] bg-[#faf7f1] px-4 py-2.5 text-sm text-[#182234] outline-none transition placeholder:text-[#8a90a0] focus:border-[#1d5d8c] focus:bg-white dark:border-[#34425b] dark:bg-[#121927] dark:text-[#e7edf8] dark:placeholder:text-[#76849b] dark:focus:border-[#7eb6e3] dark:focus:bg-[#182235]"
                   required
                 />
+                <p className="mt-2 rounded-lg border border-[#e7d7ae] bg-[#fff8e8] px-3 py-2 text-xs text-[#6d5522] dark:border-[#5f4f2b] dark:bg-[#2c2616] dark:text-[#e4c98d]">
+                  Jira tokens often default to a 1-week expiry. Set a longer expiry when creating your token to avoid frequent reconnects.
+                </p>
               </div>
 
               {error && (

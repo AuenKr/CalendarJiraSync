@@ -69,5 +69,5 @@
 
 4. [DONE] When page is loaded, and user click on new time slot for creating an event, the jira suggestion box appears at top fix it.
 
-5. [] The cache revalidation for sync jira task does not give user the feedback that something is happening in background. It just show the message no jira task to sync.
+5. [DONE] The cache revalidation for sync jira task does not give user the feedback that something is happening in background. It just show the message no jira task to sync.
    It should automatically trigger and while this action is doing u should tell the user something
