@@ -17,6 +17,8 @@ function App() {
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
   const configuredDomains = jiraDomains.map(each => each.domain)
+  const hasMultipleDomains = jiraDomains.length > 1
+  const singleDomain = jiraDomains[0]?.domain || ''
 
   const { data: projectsByDomain = {}, isFetching: fetchingProjects, refetch: refetchProjects } = useQuery({
     queryKey: ['projects-by-domain', configuredDomains],
@@ -149,55 +151,97 @@ function App() {
                 />
               </div>
 
+              <p className="mb-1 text-[10px] font-semibold tracking-[0.08em] text-[#5c687f] uppercase dark:text-[#9cafc8]">
+                {hasMultipleDomains ? 'All spaces by instance' : 'All spaces'}
+              </p>
               <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
-                {jiraDomains.map((domainConfig) => {
-                  const domain = domainConfig.domain
-                  const selectedSet = new Set(domainConfig.selectedProjectKeys)
-                  const projects = filteredProjectsByDomain[domain] || []
+                {hasMultipleDomains
+                  ? jiraDomains.map((domainConfig) => {
+                    const domain = domainConfig.domain
+                    const selectedSet = new Set(domainConfig.selectedProjectKeys)
+                    const projects = filteredProjectsByDomain[domain] || []
 
-                  return (
-                    <div key={domain} className="rounded-xl border border-[#ddd4c8] bg-[#faf7f1] p-2 dark:border-[#34425b] dark:bg-[#121927]">
-                      <div className="mb-1 flex items-center justify-between">
-                        <span className="text-[10px] font-semibold tracking-[0.08em] text-[#5c687f] uppercase dark:text-[#9cafc8]">
-                          {domain}
-                        </span>
-                        <span className="text-[10px] text-[#6f7b92] dark:text-[#8fa1ba]">
-                          {selectedSet.size} selected
-                        </span>
-                      </div>
-
-                      {projects.length > 0 ? (
-                        <div className="space-y-1.5">
-                          {projects.map((project: JiraProject) => {
-                            const isSelected = selectedSet.has(project.key)
-
-                            return (
-                              <button
-                                key={`${domain}-${project.key}`}
-                                onClick={() => toggleProject(domain, project.key)}
-                                className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
-                                  isSelected
-                                    ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47] dark:border-[#3f6c8c] dark:bg-[#1d2f44] dark:text-[#dce5f2]'
-                                    : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#c8d4e7] dark:hover:border-[#465778] dark:hover:bg-[#1a2333]'
-                                }`}
-                              >
-                                <span className="truncate text-left font-medium">{project.name}</span>
-                                <div className="flex items-center gap-2">
-                                  <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378] dark:bg-[#1f2a3d] dark:text-[#a4b4cb]">{project.key}</span>
-                                  {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c] dark:text-[#7eb6e3]" /> : <Square size={14} className="text-[#7b859a] dark:text-[#8594aa]" />}
-                                </div>
-                              </button>
-                            )
-                          })}
+                    return (
+                      <div key={domain} className="rounded-xl border border-[#ddd4c8] bg-[#faf7f1] p-2 dark:border-[#34425b] dark:bg-[#121927]">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold tracking-[0.08em] text-[#5c687f] uppercase dark:text-[#9cafc8]">
+                            {domain}
+                          </span>
+                          <span className="text-[10px] text-[#6f7b92] dark:text-[#8fa1ba]">
+                            {selectedSet.size} selected
+                          </span>
                         </div>
-                      ) : (
+
+                        {projects.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {projects.map((project: JiraProject) => {
+                              const isSelected = selectedSet.has(project.key)
+
+                              return (
+                                <button
+                                  key={`${domain}-${project.key}`}
+                                  onClick={() => toggleProject(domain, project.key)}
+                                  className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
+                                    isSelected
+                                      ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47] dark:border-[#3f6c8c] dark:bg-[#1d2f44] dark:text-[#dce5f2]'
+                                      : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#c8d4e7] dark:hover:border-[#465778] dark:hover:bg-[#1a2333]'
+                                  }`}
+                                >
+                                  <span className="truncate text-left font-medium">{project.name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378] dark:bg-[#1f2a3d] dark:text-[#a4b4cb]">{project.key}</span>
+                                    {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c] dark:text-[#7eb6e3]" /> : <Square size={14} className="text-[#7b859a] dark:text-[#8594aa]" />}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-[#d6cec1] bg-[#f7f2ea] py-3 text-center text-[11px] text-[#677086] dark:border-[#34425b] dark:bg-[#182235] dark:text-[#90a0b7]">
+                            No projects found
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                  : (() => {
+                    const selectedSet = new Set(jiraDomains[0]?.selectedProjectKeys || [])
+                    const projects = filteredProjectsByDomain[singleDomain] || []
+
+                    if (projects.length === 0) {
+                      return (
                         <div className="rounded-lg border border-dashed border-[#d6cec1] bg-[#f7f2ea] py-3 text-center text-[11px] text-[#677086] dark:border-[#34425b] dark:bg-[#182235] dark:text-[#90a0b7]">
                           No projects found
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+                      )
+                    }
+
+                    return (
+                      <div className="space-y-1.5">
+                        {projects.map((project: JiraProject) => {
+                          const isSelected = selectedSet.has(project.key)
+
+                          return (
+                            <button
+                              key={`${singleDomain}-${project.key}`}
+                              onClick={() => toggleProject(singleDomain, project.key)}
+                              className={`flex w-full items-center justify-between rounded-xl border px-2.5 py-2 text-xs transition ${
+                                isSelected
+                                  ? 'border-[#8db2cd] bg-[#edf5fb] text-[#1f2f47] dark:border-[#3f6c8c] dark:bg-[#1d2f44] dark:text-[#dce5f2]'
+                                  : 'border-[#ddd4c8] bg-[#faf7f1] text-[#2f3c53] hover:border-[#bab09f] hover:bg-[#f3ecdf] dark:border-[#34425b] dark:bg-[#121927] dark:text-[#c8d4e7] dark:hover:border-[#465778] dark:hover:bg-[#1a2333]'
+                              }`}
+                            >
+                              <span className="truncate text-left font-medium">{project.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="rounded bg-[#ece5db] px-1.5 py-0.5 text-[10px] font-semibold text-[#596378] dark:bg-[#1f2a3d] dark:text-[#a4b4cb]">{project.key}</span>
+                                {isSelected ? <CheckSquare size={14} className="text-[#1d5d8c] dark:text-[#7eb6e3]" /> : <Square size={14} className="text-[#7b859a] dark:text-[#8594aa]" />}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
               </div>
             </section>
 

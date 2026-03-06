@@ -73,6 +73,13 @@ interface EligibleEvent {
   issueRef: JiraIssueRef
 }
 
+interface EventDebugInfo {
+  id: string
+  title: string
+  startTime: string
+  endTime: string
+}
+
 export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTimeRunResult> {
   const {
     date,
@@ -110,6 +117,15 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
   const configuredDomains = await getConfiguredDomains()
   const lastLoggedDate = lastLoggedTime ? new Date(lastLoggedTime) : null
   const uniqueEvents = new Map<string, CalendarEvent>()
+  const ambiguousEvents: EventDebugInfo[] = []
+  const domainNotConfiguredEvents: Array<EventDebugInfo & { requestedDomain?: string }> = []
+
+  console.log('[Jira Sync][LogTime] Start run', {
+    date,
+    fetchedEvents: events.length,
+    configuredDomains,
+    lastLoggedTime: lastLoggedTime || null,
+  })
 
   for (const event of events) {
     if (event.id) {
@@ -130,14 +146,6 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
   let ambiguousCount = 0
 
   for (const event of processedEvents) {
-    const parsedLink = parseLinkedIssueFromText(event.title, configuredDomains)
-    if (!parsedLink.ref) {
-      if (parsedLink.reason === 'ambiguous-key') {
-        ambiguousCount++
-      }
-      continue
-    }
-
     const startTime = new Date(event.startTime)
     const endTime = new Date(event.endTime)
     const overlap = getOverlapWindow(startTime, endTime, date)
@@ -151,6 +159,32 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
 
     const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
     if (durationSeconds <= 0) continue
+
+    const parsedLink = parseLinkedIssueFromText(event.title, configuredDomains)
+    if (!parsedLink.ref) {
+      if (parsedLink.reason === 'ambiguous-key') {
+        ambiguousCount++
+        const eventInfo = {
+          id: event.id || `${event.title}::${event.startTime}::${event.endTime}`,
+          title: event.title,
+          startTime: event.startTime,
+          endTime: event.endTime,
+        }
+        ambiguousEvents.push(eventInfo)
+        console.warn('[Jira Sync][LogTime] Skipping ambiguous linked event; relink required', eventInfo)
+      } else if (parsedLink.reason === 'domain-not-configured') {
+        const eventInfo = {
+          id: event.id || `${event.title}::${event.startTime}::${event.endTime}`,
+          title: event.title,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          requestedDomain: parsedLink.requestedDomain,
+        }
+        domainNotConfiguredEvents.push(eventInfo)
+        console.warn('[Jira Sync][LogTime] Skipping event linked to unconfigured domain', eventInfo)
+      }
+      continue
+    }
 
     eligibleEvents.push({
       event,
@@ -186,6 +220,13 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
       const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
       await addWorklogFn(issueRef, durationSeconds, jiraStarted, comment)
       loggedCount++
+      console.log('[Jira Sync][LogTime] Worklog added', {
+        eventId: event.id || `${event.title}::${event.startTime}::${event.endTime}`,
+        eventTitle: event.title,
+        issueRef: `${issueRef.domain}|${issueRef.issueKey}`,
+        durationSeconds,
+        jiraStarted,
+      })
     } catch (e) {
       console.error(`[Jira Sync] Failed to log worklog for ${issueRef.domain}|${issueRef.issueKey}`, e)
       errors++
@@ -196,6 +237,14 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     const ambiguitySuffix = ambiguousCount > 0
       ? ` (${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'} require relink)`
       : ''
+
+    console.log('[Jira Sync][LogTime] No new completed tasks found to log', {
+      eligibleCount: eligibleEvents.length,
+      ambiguousCount,
+      ambiguousEvents,
+      domainNotConfiguredCount: domainNotConfiguredEvents.length,
+      domainNotConfiguredEvents,
+    })
 
     return {
       loggedCount,
@@ -212,6 +261,17 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     message += `, skipped ${ambiguousCount} ambiguous event${ambiguousCount === 1 ? '' : 's'}`
   }
   message += '!'
+
+  console.log('[Jira Sync][LogTime] Run completed', {
+    loggedCount,
+    errors,
+    eligibleCount: eligibleEvents.length,
+    ambiguousCount,
+    ambiguousEvents,
+    domainNotConfiguredCount: domainNotConfiguredEvents.length,
+    domainNotConfiguredEvents,
+    message,
+  })
 
   return {
     loggedCount,
@@ -252,14 +312,27 @@ export async function resetWorklogsForDate(date: string): Promise<ResetRunResult
   }
 
   try {
+    console.log('[Jira Sync][ResetWorklogs] Start reset run', { date })
     const result = await resetExtensionWorklogsByDate(date)
     if (result.matchedCount === 0) {
+      console.log('[Jira Sync][ResetWorklogs] No extension worklogs found', {
+        date,
+        matchedCount: result.matchedCount,
+        scannedIssues: result.scannedIssues,
+      })
       return {
         ...result,
         message: 'No extension worklogs found for selected date',
         isError: false,
       }
     }
+
+    console.log('[Jira Sync][ResetWorklogs] Reset completed', {
+      date,
+      deletedCount: result.deletedCount,
+      matchedCount: result.matchedCount,
+      scannedIssues: result.scannedIssues,
+    })
 
     return {
       ...result,

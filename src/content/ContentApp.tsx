@@ -4,7 +4,7 @@ import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink, AlertTriangle, Se
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
-import { formatIssueRefLabel, formatLinkedIssueTitle, issueRefEquals, parseLinkedIssueFromText, stripLinkedIssuePrefix } from '@/lib/jiraLink'
+import { formatDomainDisplayLabel, formatIssueRefLabel, formatLinkedIssueTitle, issueRefEquals, parseLinkedIssueFromText, stripLinkedIssuePrefix } from '@/lib/jiraLink'
 import type { JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
 import { getStoredJiraConfig } from '@/lib/jiraConfig'
 
@@ -1517,7 +1517,7 @@ export default function ContentApp({
                 <button
                   className={cn(
                     'inline-flex w-fit max-w-[160px] items-center rounded-full font-medium transition-colors border hover:cursor-pointer',
-                    isBubbleView ? 'gap-1 px-2.5 py-1 text-[11px]' : 'gap-1.5 px-3 py-1.5 text-[12px]',
+                    isBubbleView ? 'h-6 gap-1 px-2.5 text-[11px]' : 'h-7 gap-1.5 px-3 text-[12px]',
                     'bg-[#f1f3f4] text-black border-[#dadce0] hover:bg-[#e8eaed]',
                     'dark:bg-[#3c4043] dark:text-white dark:border-[#5f6368] dark:hover:bg-[#5f6368]'
                   )}
@@ -1569,8 +1569,12 @@ export default function ContentApp({
               </PopoverContent>
             </Popover>
             {hasMultipleDomains && (
-              <span className="rounded-full border border-[#d4dae6] bg-[#f7f8fb] px-2 py-0.5 text-[10px] font-semibold text-[#596579] dark:border-[#4b5568] dark:bg-[#2d3440] dark:text-[#c7d2e4]">
-                {linkedIssueRef.domain}
+              <span className={cn(
+                'inline-flex items-center rounded-full border font-semibold',
+                isBubbleView ? 'h-6 px-2.5 text-[10px]' : 'h-7 px-3 text-[11px]',
+                'border-[#d4dae6] bg-[#f7f8fb] text-[#596579] dark:border-[#4b5568] dark:bg-[#2d3440] dark:text-[#c7d2e4]'
+              )}>
+                {formatDomainDisplayLabel(linkedIssueRef.domain)}
               </span>
             )}
           </div>

@@ -2,6 +2,7 @@ import type { JiraIssueRef } from '@/types/jira'
 import { normalizeJiraDomain } from '@/lib/jiraConfig'
 
 const MULTI_DOMAIN_LINK_PATTERN = /\[([^[\]|]+)\|([A-Z][A-Z0-9]+-\d+)\]/
+const KEY_WITH_TRAILING_DOMAIN_PATTERN = /^\[([A-Z][A-Z0-9]+-\d+)\]\s*:?\s*(.*?)\s*:?\s*\[([^[\]|]+\.[^[\]|]+)\]\s*$/
 const ISSUE_KEY_PATTERN = /\[?([A-Z][A-Z0-9]+-\d+)\]?/
 
 export type LinkedIssueParseReason =
@@ -25,6 +26,29 @@ export function parseLinkedIssueFromText(text: string, configuredDomains: string
   if (explicit?.[1] && explicit?.[2]) {
     const domain = normalizeJiraDomain(explicit[1])
     const issueKey = explicit[2]
+    if (!domain) {
+      return { ref: null, reason: 'no-link' }
+    }
+
+    if (uniqueDomains.length > 0 && !uniqueDomains.includes(domain)) {
+      return {
+        ref: null,
+        issueKey,
+        requestedDomain: domain,
+        reason: 'domain-not-configured',
+      }
+    }
+
+    return {
+      ref: { domain, issueKey },
+    }
+  }
+
+  const keyWithDomain = normalizedText.match(KEY_WITH_TRAILING_DOMAIN_PATTERN)
+  if (keyWithDomain?.[1] && keyWithDomain?.[3]) {
+    const issueKey = keyWithDomain[1]
+    const domain = normalizeJiraDomain(keyWithDomain[3])
+
     if (!domain) {
       return { ref: null, reason: 'no-link' }
     }
@@ -70,15 +94,18 @@ export function parseLinkedIssueFromText(text: string, configuredDomains: string
 }
 
 export function stripLinkedIssuePrefix(value: string): string {
-  return value
+  const withoutPrefix = value
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/^\[[^[\]]+\]\s*/, '')
+    .replace(/^\[[^[\]]+\]\s*:?\s*/, '')
+
+  return withoutPrefix
+    .replace(/\s*:?\s*\[[a-z0-9][a-z0-9.-]*\.[a-z0-9.-]+\]\s*$/i, '')
     .trim()
 }
 
 export function formatLinkedIssueTitle(issueRef: JiraIssueRef, summary: string, configuredDomainCount: number): string {
   if (configuredDomainCount > 1) {
-    return `[${issueRef.domain}|${issueRef.issueKey}] ${summary}`
+    return `[${issueRef.issueKey}] ${summary} [${issueRef.domain}]`
   }
 
   return `[${issueRef.issueKey}] ${summary}`
@@ -99,4 +126,23 @@ export function issueRefEquals(a: JiraIssueRef | null, b: JiraIssueRef | null): 
 
 export function issueRefKey(ref: JiraIssueRef): string {
   return `${normalizeJiraDomain(ref.domain)}|${ref.issueKey}`
+}
+
+export function formatDomainDisplayLabel(domain: string): string {
+  const normalized = normalizeJiraDomain(domain)
+  const parts = normalized.split('.').filter(Boolean)
+
+  if (parts.length === 0) {
+    return domain.trim()
+  }
+
+  if (normalized.endsWith('.atlassian.net')) {
+    return parts[0]
+  }
+
+  if (parts.length >= 2) {
+    return `${parts[0]}.${parts[1]}`
+  }
+
+  return parts[0]
 }
