@@ -25,16 +25,39 @@ function parseVersion(tag) {
   }
 }
 
-function getLatestTag() {
+function compareTags(left, right) {
+  const leftParsed = parseVersion(left)
+  const rightParsed = parseVersion(right)
+
+  if (!leftParsed || !rightParsed) {
+    throw new Error(`Unsupported tag comparison: "${left}" vs "${right}"`)
+  }
+
+  if (leftParsed.major !== rightParsed.major) {
+    return leftParsed.major - rightParsed.major
+  }
+
+  if (leftParsed.minor !== rightParsed.minor) {
+    return leftParsed.minor - rightParsed.minor
+  }
+
+  return leftParsed.patch - rightParsed.patch
+}
+
+function getLatestReleaseTag() {
   try {
     const tag = run('gh release view --json tagName --jq .tagName', {
       capture: true,
     }).trim()
     if (tag) return tag
   } catch (_) {
-    // Fallback to git tags when releases don't exist yet
+    // Releases don't exist yet
   }
 
+  return null
+}
+
+function getLatestGitTag() {
   try {
     const tag = run('git tag --list "v*" --sort=-v:refname | head -n 1', {
       capture: true,
@@ -44,7 +67,7 @@ function getLatestTag() {
     // No tags yet
   }
 
-  return 'v1.0.0'
+  return null
 }
 
 function bumpPatch(tag) {
@@ -106,6 +129,19 @@ function readJsonFile(path) {
   return JSON.parse(readFileSync(path, 'utf-8'))
 }
 
+function getCurrentVersion() {
+  const packageJson = readJsonFile(PACKAGE_JSON_PATH)
+  const manifestJson = readJsonFile(MANIFEST_JSON_PATH)
+
+  if (packageJson.version !== manifestJson.version) {
+    throw new Error(
+      `Version mismatch: package.json=${packageJson.version}, manifest.json=${manifestJson.version}`,
+    )
+  }
+
+  return packageJson.version
+}
+
 function updateVersionFiles(version) {
   const packageJson = readJsonFile(PACKAGE_JSON_PATH)
   const manifestJson = readJsonFile(MANIFEST_JSON_PATH)
@@ -122,22 +158,48 @@ function commitVersionFiles(version) {
   run(`git commit -m "chore: release v${version}"`)
 }
 
+function tagExists(tag) {
+  try {
+    const output = run(`git rev-parse --verify --quiet "${tag}"`, {
+      capture: true,
+    }).trim()
+    return Boolean(output)
+  } catch (_) {
+    return false
+  }
+}
+
+function getHeadSha(ref = 'HEAD') {
+  return run(`git rev-parse "${ref}"`, {
+    capture: true,
+  }).trim()
+}
+
 function main() {
   ensurePrerequisites()
 
-  const latestTag = getLatestTag()
-  const nextTag = bumpPatch(latestTag)
+  const latestReleaseTag = getLatestReleaseTag() ?? 'v1.0.0'
+  const latestGitTag = getLatestGitTag()
+  const currentVersion = getCurrentVersion()
+  const currentTag = `v${currentVersion}`
+  const currentTagExists = tagExists(currentTag)
+  const publishCurrentVersion = compareTags(currentTag, latestReleaseTag) > 0
+  const nextTag = publishCurrentVersion ? currentTag : bumpPatch(latestReleaseTag)
   const nameWithOwner = getRepoNameWithOwner()
   const version = nextTag.slice(1)
   const zipFile = `${RELEASE_DIR}/calendar-jira-sync-v${version}.zip`
-  const commitMessages = getCommitMessagesSinceTag(latestTag)
+  const commitMessages = getCommitMessagesSinceTag(latestReleaseTag)
   const commitsSection = commitMessages.length
     ? commitMessages.map((message) => `- ${message}`).join('\n')
     : '- No commits found since previous release'
-  const notes = `Automated release ${nextTag}\n\nCommits since ${latestTag}:\n${commitsSection}`
+  const notes = `Automated release ${nextTag}\n\nCommits since ${latestReleaseTag}:\n${commitsSection}`
 
-  console.log(`[release] Latest tag: ${latestTag}`)
-  console.log(`[release] Next tag: ${nextTag}`)
+  console.log(`[release] Latest release tag: ${latestReleaseTag}`)
+  if (latestGitTag) {
+    console.log(`[release] Latest git tag: ${latestGitTag}`)
+  }
+  console.log(`[release] Current version: ${currentVersion}`)
+  console.log(`[release] Target tag: ${nextTag}`)
   console.log(`[release] Verifying tag availability via GET /repos/${nameWithOwner}/releases/tags/${nextTag}`)
 
   const exists = releaseTagExists(nameWithOwner, nextTag)
@@ -146,14 +208,27 @@ function main() {
   }
   console.log(`[release] Tag available: ${nextTag}`)
 
+  if (publishCurrentVersion && currentTagExists) {
+    const tagSha = getHeadSha(currentTag)
+    const headSha = getHeadSha()
+
+    if (tagSha !== headSha) {
+      throw new Error(
+        `Current version ${currentTag} is already tagged at ${tagSha.slice(0, 7)}, but HEAD is ${headSha.slice(0, 7)}. Publish that tag separately or bump the version before releasing HEAD.`,
+      )
+    }
+  }
+
   if (VERIFY_ONLY) {
     console.log('[release] Verify-only mode enabled. Skipping build, tag push, and release publish.')
     return
   }
 
-  updateVersionFiles(version)
-  commitVersionFiles(version)
-  run('git push')
+  if (!publishCurrentVersion) {
+    updateVersionFiles(version)
+    commitVersionFiles(version)
+    run('git push')
+  }
 
   run('bun run build')
 
@@ -171,7 +246,9 @@ function main() {
   const notesFile = `${RELEASE_DIR}/.release-notes-${nextTag}.md`
   writeFileSync(notesFile, notes, 'utf-8')
 
-  run(`git tag "${nextTag}"`)
+  if (!currentTagExists || nextTag !== currentTag) {
+    run(`git tag "${nextTag}"`)
+  }
   run(`git push origin "${nextTag}"`)
 
   try {
