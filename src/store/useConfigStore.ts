@@ -2,18 +2,22 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Project } from 'jira.js/out/version3/models'
 import type { JiraDomainConfig } from '@/types/jira'
+import type { ThemePreference } from '@/types/theme'
 import { chromeStorage } from './storage'
 import { normalizeDomainConfigs, normalizeJiraDomains, parseJiraConfig, normalizeJiraDomain } from '@/lib/jiraConfig'
+import { DEFAULT_THEME_PREFERENCE, normalizeThemePreference } from '@/types/theme'
 
 interface ConfigState {
   jiraDomains: JiraDomainConfig[]
   email: string
   apiToken: string
+  themePreference: ThemePreference
   projectsByDomain: Record<string, Project[]>
   lastLoggedTimes: Record<string, string>
   setCredentials: (credentials: { email: string; apiToken: string }) => void
   setJiraDomains: (domains: string[]) => void
   setConfig: (config: { jiraDomains: string[]; email: string; apiToken: string }) => void
+  setThemePreference: (themePreference: ThemePreference) => void
   toggleProject: (domain: string, projectKey: string) => void
   setProjectsForDomain: (domain: string, projects: Project[]) => void
   setSelectedProjectsForDomain: (domain: string, selectedProjectKeys: string[]) => void
@@ -28,12 +32,13 @@ interface LegacyStateShape {
   jiraDomains?: Array<{ domain?: string; selectedProjectKeys?: string[] }>
   email?: string
   apiToken?: string
+  themePreference?: ThemePreference
   projects?: Project[]
   projectsByDomain?: Record<string, Project[]>
   lastLoggedTimes?: Record<string, string>
 }
 
-function buildConfigState(partial: LegacyStateShape): Pick<ConfigState, 'jiraDomains' | 'email' | 'apiToken' | 'projectsByDomain' | 'lastLoggedTimes'> {
+function buildConfigState(partial: LegacyStateShape): Pick<ConfigState, 'jiraDomains' | 'email' | 'apiToken' | 'themePreference' | 'projectsByDomain' | 'lastLoggedTimes'> {
   const parsed = parseJiraConfig(partial)
   const projectsByDomain = partial.projectsByDomain && typeof partial.projectsByDomain === 'object'
     ? partial.projectsByDomain
@@ -54,6 +59,7 @@ function buildConfigState(partial: LegacyStateShape): Pick<ConfigState, 'jiraDom
     jiraDomains: normalizeDomainConfigs(parsed.jiraDomains),
     email: parsed.email,
     apiToken: parsed.apiToken,
+    themePreference: normalizeThemePreference(partial.themePreference),
     projectsByDomain: normalizedProjectsByDomain,
     lastLoggedTimes: partial.lastLoggedTimes && typeof partial.lastLoggedTimes === 'object'
       ? partial.lastLoggedTimes
@@ -81,6 +87,7 @@ export const useConfigStore = create<ConfigState>()(
       jiraDomains: [],
       email: '',
       apiToken: '',
+      themePreference: DEFAULT_THEME_PREFERENCE,
       projectsByDomain: {},
       lastLoggedTimes: {},
 
@@ -130,6 +137,10 @@ export const useConfigStore = create<ConfigState>()(
           jiraDomains: normalizeDomainConfigs(nextJiraDomains),
           projectsByDomain: nextProjectsByDomain,
         }
+      }),
+
+      setThemePreference: (themePreference) => set({
+        themePreference: normalizeThemePreference(themePreference),
       }),
 
       toggleProject: (domain, projectKey) => set((state) => ({
@@ -188,7 +199,7 @@ export const useConfigStore = create<ConfigState>()(
     }),
     {
       name: 'jira-sync-config',
-      version: 2,
+      version: 3,
       migrate: (persistedState) => {
         const typedState = (persistedState || {}) as LegacyStateShape
         return buildConfigState(typedState)

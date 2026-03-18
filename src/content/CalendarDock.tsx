@@ -20,6 +20,7 @@ export default function CalendarDock() {
   const isDateValid = isValidLogDate(selectedDate)
 
   const { lastLoggedTimes, setLastLoggedTime, clearLastLoggedTime } = useConfigStore()
+  const lastLoggedAt = lastLoggedTimes[selectedDate] ? new Date(lastLoggedTimes[selectedDate]) : null
 
   useEffect(() => {
     if (!open) return
@@ -172,7 +173,10 @@ export default function CalendarDock() {
 
             {lastLoggedTimes[selectedDate] && (
               <p className="text-center text-[10px] text-[#5f6368] dark:text-[#bdc1c6]">
-                Last logged: {new Date(lastLoggedTimes[selectedDate]).toLocaleTimeString()}
+                Last logged: {lastLoggedAt?.toLocaleString(undefined, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
               </p>
             )}
 

@@ -14,7 +14,9 @@ import {
 } from 'lucide-react'
 import type { JiraProject } from '@/lib/jira'
 import { getProjects, syncData } from '@/lib/jira'
+import { useThemePreference } from '@/lib/theme'
 import { useConfigStore } from '@/store/useConfigStore'
+import { useConfigStoreHydrated } from '@/store/useConfigStoreHydrated'
 import { normalizeJiraDomains, normalizeJiraDomain } from '@/lib/jiraConfig'
 
 function App() {
@@ -22,11 +24,16 @@ function App() {
     jiraDomains,
     email,
     apiToken,
+    themePreference,
     projectsByDomain,
     setConfig,
     setProjectsForDomain,
     toggleProject,
   } = useConfigStore()
+
+  const hydrated = useConfigStoreHydrated()
+
+  useThemePreference(hydrated ? themePreference : null)
 
   const [formData, setFormData] = useState({
     domains: jiraDomains.map(each => each.domain),

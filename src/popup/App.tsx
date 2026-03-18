@@ -1,18 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, AlertTriangle } from 'lucide-react'
+import { Settings, RefreshCw, Layout, AlertCircle, CheckSquare, Square, Search, AlertTriangle, Monitor, Moon, Sun } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Input } from '@/components/ui/input'
 import { getProjects, getStoredIssues, syncData, type JiraProject } from '@/lib/jira'
+import { useThemePreference } from '@/lib/theme'
 import { useConfigStore } from '@/store/useConfigStore'
+import { useConfigStoreHydrated } from '@/store/useConfigStoreHydrated'
+import type { ThemePreference } from '@/types/theme'
+
+const themeOptions: Array<{
+  value: ThemePreference
+  label: string
+  icon: typeof Monitor
+}> = [
+  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+]
 
 function App() {
   const {
     isConfigured,
     jiraDomains,
+    themePreference,
     toggleProject,
+    setThemePreference,
     projectsByDomain: storedProjectsByDomain,
     setProjectsForDomain,
   } = useConfigStore()
+
+  const hydrated = useConfigStoreHydrated()
+
+  useThemePreference(hydrated ? themePreference : null)
 
   const configured = isConfigured()
   const [searchQuery, setSearchQuery] = useState('')
@@ -131,10 +150,35 @@ function App() {
 
       <div className="relative space-y-4">
         <header className="flex items-center justify-between rounded-2xl border border-[#d6cec1] bg-[#faf7f1] p-3 shadow-[0_14px_30px_-26px_rgba(20,27,39,0.8)] transition-colors dark:border-[#2a3447] dark:bg-[#171e2b] dark:shadow-[0_14px_30px_-26px_rgba(0,0,0,1)]">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-base leading-tight [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',serif]">
               Calendar Jira Sync
             </h1>
+            <p className="mt-1 text-[10px] font-semibold tracking-[0.08em] text-[#647086] uppercase dark:text-[#97a8bf]">
+              Theme preference
+            </p>
+            <div className="mt-2 inline-flex rounded-full border border-[#d4cbbb] bg-[#f3ede4] p-1 dark:border-[#314057] dark:bg-[#121927]">
+              {themeOptions.map(({ value, label, icon: Icon }) => {
+                const isSelected = themePreference === value
+
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setThemePreference(value)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${
+                      isSelected
+                        ? 'bg-white text-[#18314b] shadow-[0_8px_18px_-14px_rgba(20,27,39,0.9)] dark:bg-[#223047] dark:text-[#eef4ff]'
+                        : 'text-[#5d687c] hover:text-[#1d5d8c] dark:text-[#90a1b7] dark:hover:text-[#cfe0f4]'
+                    }`}
+                    aria-pressed={isSelected}
+                    title={`Use ${label.toLowerCase()} theme`}
+                  >
+                    <Icon size={12} />
+                    <span>{label}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <button
             onClick={openSetup}

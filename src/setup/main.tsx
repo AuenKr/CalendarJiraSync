@@ -1,28 +1,17 @@
 import ReactDOM from 'react-dom/client'
 import { StrictMode } from 'react'
+import { initializeTheme } from '@/lib/theme'
 import App from './App'
 import '../index.css'
 
-const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+async function bootstrap() {
+  await initializeTheme()
 
-const applyTheme = (isDark: boolean) => {
-  document.documentElement.classList.toggle('dark', isDark)
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
 }
 
-applyTheme(mediaQuery.matches)
-
-const onSchemeChange = (event: MediaQueryListEvent) => {
-  applyTheme(event.matches)
-}
-
-if (typeof mediaQuery.addEventListener === 'function') {
-  mediaQuery.addEventListener('change', onSchemeChange)
-} else {
-  mediaQuery.addListener(onSchemeChange)
-}
-
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+void bootstrap()
