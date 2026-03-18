@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { createInterface } from 'node:readline/promises'
+import { stdin, stdout } from 'node:process'
 
 const RELEASE_DIR = 'release'
 const DIST_DIR = 'dist'
@@ -77,6 +79,17 @@ function bumpPatch(tag) {
   }
 
   return `v${parsed.major}.${parsed.minor}.${parsed.patch + 1}`
+}
+
+function normalizeTag(version) {
+  const trimmed = version.trim()
+  const normalized = trimmed.startsWith('v') ? trimmed : `v${trimmed}`
+
+  if (!parseVersion(normalized)) {
+    throw new Error(`Unsupported version format: "${version}". Expected <major>.<minor>.<patch>`)
+  }
+
+  return normalized
 }
 
 function ensurePrerequisites() {
@@ -175,17 +188,39 @@ function getHeadSha(ref = 'HEAD') {
   }).trim()
 }
 
-function main() {
+async function promptForVersion(defaultTag) {
+  if (!stdin.isTTY || !stdout.isTTY) {
+    console.log(`[release] Non-interactive shell detected. Using default version ${defaultTag.slice(1)}.`)
+    return defaultTag
+  }
+
+  const rl = createInterface({
+    input: stdin,
+    output: stdout,
+  })
+
+  try {
+    const answer = await rl.question(`Release version [${defaultTag.slice(1)}]: `)
+    const selectedVersion = answer.trim() || defaultTag.slice(1)
+    return normalizeTag(selectedVersion)
+  } finally {
+    rl.close()
+  }
+}
+
+async function main() {
   ensurePrerequisites()
 
   const latestReleaseTag = getLatestReleaseTag() ?? 'v1.0.0'
   const latestGitTag = getLatestGitTag()
   const currentVersion = getCurrentVersion()
   const currentTag = `v${currentVersion}`
-  const currentTagExists = tagExists(currentTag)
-  const publishCurrentVersion = compareTags(currentTag, latestReleaseTag) > 0
-  const nextTag = publishCurrentVersion ? currentTag : bumpPatch(latestReleaseTag)
+  const suggestedTag = compareTags(currentTag, latestReleaseTag) > 0 ? currentTag : bumpPatch(latestReleaseTag)
   const nameWithOwner = getRepoNameWithOwner()
+  const nextTag = VERIFY_ONLY ? suggestedTag : await promptForVersion(suggestedTag)
+  const currentTagExists = tagExists(currentTag)
+  const nextTagExists = tagExists(nextTag)
+  const publishCurrentVersion = nextTag === currentTag && compareTags(currentTag, latestReleaseTag) > 0
   const version = nextTag.slice(1)
   const zipFile = `${RELEASE_DIR}/calendar-jira-sync-v${version}.zip`
   const commitMessages = getCommitMessagesSinceTag(latestReleaseTag)
@@ -199,8 +234,17 @@ function main() {
     console.log(`[release] Latest git tag: ${latestGitTag}`)
   }
   console.log(`[release] Current version: ${currentVersion}`)
+  console.log(`[release] Suggested tag: ${suggestedTag}`)
   console.log(`[release] Target tag: ${nextTag}`)
   console.log(`[release] Verifying tag availability via GET /repos/${nameWithOwner}/releases/tags/${nextTag}`)
+
+  if (compareTags(nextTag, latestReleaseTag) <= 0) {
+    throw new Error(`Release version must be greater than the latest published release (${latestReleaseTag}).`)
+  }
+
+  if (compareTags(currentTag, latestReleaseTag) > 0 && compareTags(nextTag, currentTag) < 0) {
+    throw new Error(`Release version ${nextTag} is lower than the current repo version ${currentTag}.`)
+  }
 
   const exists = releaseTagExists(nameWithOwner, nextTag)
   if (exists) {
@@ -208,13 +252,13 @@ function main() {
   }
   console.log(`[release] Tag available: ${nextTag}`)
 
-  if (publishCurrentVersion && currentTagExists) {
-    const tagSha = getHeadSha(currentTag)
+  if (publishCurrentVersion && nextTagExists) {
+    const tagSha = getHeadSha(nextTag)
     const headSha = getHeadSha()
 
     if (tagSha !== headSha) {
       throw new Error(
-        `Current version ${currentTag} is already tagged at ${tagSha.slice(0, 7)}, but HEAD is ${headSha.slice(0, 7)}. Publish that tag separately or bump the version before releasing HEAD.`,
+        `Current version ${nextTag} is already tagged at ${tagSha.slice(0, 7)}, but HEAD is ${headSha.slice(0, 7)}. Publish that tag separately or choose a newer version before releasing HEAD.`,
       )
     }
   }
@@ -246,7 +290,7 @@ function main() {
   const notesFile = `${RELEASE_DIR}/.release-notes-${nextTag}.md`
   writeFileSync(notesFile, notes, 'utf-8')
 
-  if (!currentTagExists || nextTag !== currentTag) {
+  if (!nextTagExists) {
     run(`git tag "${nextTag}"`)
   }
   run(`git push origin "${nextTag}"`)
@@ -260,4 +304,4 @@ function main() {
   console.log(`[release] Published ${nextTag} with asset ${zipFile}`)
 }
 
-main()
+await main()
