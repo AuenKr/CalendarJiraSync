@@ -1471,7 +1471,7 @@ export default function ContentApp({
           onCloseAutoFocus={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="max-h-60 overflow-y-auto">
+          <div className="jira-sync-thin-scrollbar max-h-60 overflow-y-auto">
             {isSuggestionMode && visibleIssues.length > 0 && (
               <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground border-b border-border">
                 Suggested Jira tasks

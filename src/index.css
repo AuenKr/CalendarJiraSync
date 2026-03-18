@@ -132,3 +132,29 @@
   cursor: pointer;
   opacity: 0;
 }
+
+.jira-sync-thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 42%, transparent) transparent;
+}
+
+.jira-sync-thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.jira-sync-thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.jira-sync-thin-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 42%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.jira-sync-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--foreground) 48%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
