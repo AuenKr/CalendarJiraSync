@@ -1,5 +1,9 @@
+import { normalizeJiraDomain } from '@/lib/jiraConfig'
+import type { StoredExtensionWorklogMetadata } from '@/types/jira'
+
 const WORKLOG_MARKER_PREFIX = '[[CJS_META_V1]]'
 const WORKLOG_SOURCE = 'calendar-jira-sync'
+const EXTENSION_WORKLOGS_STORAGE_KEY = 'extension_worklogs'
 
 export interface ExtensionWorklogMetadata {
   source: typeof WORKLOG_SOURCE
@@ -23,39 +27,6 @@ export function createExtensionWorklogMetadata(date: string, eventId?: string): 
     date,
     eventId,
   }
-}
-
-export function buildMetadataLine(metadata: ExtensionWorklogMetadata): string {
-  return `${WORKLOG_MARKER_PREFIX}${JSON.stringify(metadata)}`
-}
-
-export function buildWorklogComment({
-  startTime,
-  endTime,
-  description,
-  metadata,
-}: {
-  startTime: Date
-  endTime: Date
-  description?: string
-  metadata: ExtensionWorklogMetadata
-}): string {
-  const formatDate = (value: Date) => {
-    const day = String(value.getDate()).padStart(2, '0')
-    const month = String(value.getMonth() + 1).padStart(2, '0')
-    const year = value.getFullYear()
-    return `${day}-${month}-${year}`
-  }
-  const formatDateTime = (value: Date) => `${formatDate(value)} ${value.toLocaleTimeString()}`
-
-  let comment = `Start: ${formatDateTime(startTime)}\nEnd: ${formatDateTime(endTime)}`
-
-  if (description?.trim()) {
-    comment += `\n\n${description.trim()}`
-  }
-
-  comment += `\n\n${buildMetadataLine(metadata)}`
-  return comment
 }
 
 function adfNodeToText(node: unknown): string {
@@ -140,4 +111,117 @@ export function parseExtensionMetadataFromCommentText(commentText: string): Exte
 export function parseExtensionMetadataFromComment(comment: unknown): ExtensionWorklogMetadata | null {
   const text = adfCommentToPlainText(comment)
   return parseExtensionMetadataFromCommentText(text)
+}
+
+function isValidStoredExtensionWorklogMetadata(value: unknown): value is StoredExtensionWorklogMetadata {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const typed = value as Record<string, unknown>
+  return typeof typed.domain === 'string' &&
+    !!normalizeJiraDomain(typed.domain) &&
+    typeof typed.issueKey === 'string' &&
+    typed.issueKey.trim().length > 0 &&
+    typeof typed.worklogId === 'string' &&
+    typed.worklogId.trim().length > 0 &&
+    typeof typed.date === 'string' &&
+    isValidDateString(typed.date) &&
+    (typed.eventId === undefined || typeof typed.eventId === 'string')
+}
+
+function normalizeStoredExtensionWorklogMetadata(
+  value: StoredExtensionWorklogMetadata,
+): StoredExtensionWorklogMetadata | null {
+  const domain = normalizeJiraDomain(value.domain)
+  if (!domain) return null
+
+  return {
+    domain,
+    issueKey: value.issueKey.trim(),
+    worklogId: value.worklogId.trim(),
+    date: value.date,
+    eventId: value.eventId?.trim() || undefined,
+  }
+}
+
+function getLocalStorageValue(key: string): unknown {
+  if (typeof localStorage === 'undefined') return null
+
+  const raw = localStorage.getItem(key)
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+async function getStorageValue(key: string): Promise<unknown> {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    const result = await chrome.storage.local.get(key)
+    return result[key]
+  }
+
+  return getLocalStorageValue(key)
+}
+
+async function setStorageValue(key: string, value: unknown): Promise<void> {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.set({ [key]: value })
+    return
+  }
+
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(key, JSON.stringify(value))
+}
+
+export function getStoredExtensionWorklogKey({
+  domain,
+  issueKey,
+  worklogId,
+}: Pick<StoredExtensionWorklogMetadata, 'domain' | 'issueKey' | 'worklogId'>): string {
+  return `${normalizeJiraDomain(domain) || domain}|${issueKey.trim()}|${worklogId.trim()}`
+}
+
+export function normalizeStoredExtensionWorklogs(raw: unknown): StoredExtensionWorklogMetadata[] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+
+  const deduped = new Map<string, StoredExtensionWorklogMetadata>()
+
+  for (const item of raw) {
+    if (!isValidStoredExtensionWorklogMetadata(item)) continue
+
+    const normalized = normalizeStoredExtensionWorklogMetadata(item)
+    if (!normalized) continue
+
+    deduped.set(getStoredExtensionWorklogKey(normalized), normalized)
+  }
+
+  return Array.from(deduped.values())
+}
+
+export async function getStoredExtensionWorklogs(): Promise<StoredExtensionWorklogMetadata[]> {
+  const raw = await getStorageValue(EXTENSION_WORKLOGS_STORAGE_KEY)
+  return normalizeStoredExtensionWorklogs(raw)
+}
+
+export async function setStoredExtensionWorklogs(worklogs: StoredExtensionWorklogMetadata[]): Promise<void> {
+  const normalized = normalizeStoredExtensionWorklogs(worklogs)
+  await setStorageValue(EXTENSION_WORKLOGS_STORAGE_KEY, normalized)
+}
+
+export async function saveStoredExtensionWorklog(worklog: StoredExtensionWorklogMetadata): Promise<void> {
+  const normalized = normalizeStoredExtensionWorklogMetadata(worklog)
+  if (!normalized) {
+    throw new Error('Invalid extension worklog metadata')
+  }
+
+  const existing = await getStoredExtensionWorklogs()
+  const deduped = new Map(existing.map(item => [getStoredExtensionWorklogKey(item), item]))
+  deduped.set(getStoredExtensionWorklogKey(normalized), normalized)
+  await setStoredExtensionWorklogs(Array.from(deduped.values()))
 }

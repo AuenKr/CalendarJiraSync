@@ -19,3 +19,11 @@ export interface JiraDomainConfig {
   domain: string
   selectedProjectKeys: string[]
 }
+
+export interface StoredExtensionWorklogMetadata {
+  domain: string
+  issueKey: string
+  worklogId: string
+  date: string
+  eventId?: string
+}

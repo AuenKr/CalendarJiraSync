@@ -1,6 +1,6 @@
 import type { ResetExtensionWorklogsByDateResponse, CalendarEvent } from '@/types/messages'
 import { addWorklog, resetExtensionWorklogsByDate } from '@/lib/jira'
-import { buildWorklogComment, createExtensionWorklogMetadata } from '@/lib/worklogMetadata'
+import { saveStoredExtensionWorklog } from '@/lib/worklogMetadata'
 import { getStoredJiraConfig, hasConfiguredJiraDomains } from '@/lib/jiraConfig'
 import { parseLinkedIssueFromText } from '@/lib/jiraLink'
 import type { JiraIssueRef } from '@/types/jira'
@@ -10,7 +10,7 @@ export interface LogTimeRunInput {
   lastLoggedTime?: string | null
   fetchEvents: () => Promise<CalendarEvent[]>
   fetchDescription?: (eventId: string) => Promise<string | undefined>
-  addWorklogFn?: (issueRef: JiraIssueRef, timeSpentSeconds: number, started: string, comment?: string) => Promise<unknown>
+  addWorklogFn?: (issueRef: JiraIssueRef, timeSpentSeconds: number, started: string, comment?: string) => Promise<{ id?: string }>
   now?: Date
 }
 
@@ -203,15 +203,22 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
         description = await fetchDescription(event.id)
       }
 
-      const comment = buildWorklogComment({
-        startTime: overlap.overlapStart,
-        endTime: overlap.overlapEnd,
-        description,
-        metadata: createExtensionWorklogMetadata(date, event.id),
+      const comment = description?.trim() || undefined
+      const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
+      const worklog = await addWorklogFn(issueRef, durationSeconds, jiraStarted, comment)
+
+      if (!worklog?.id) {
+        throw new Error('Jira worklog creation succeeded without a worklog ID')
+      }
+
+      await saveStoredExtensionWorklog({
+        domain: issueRef.domain,
+        issueKey: issueRef.issueKey,
+        worklogId: worklog.id,
+        date,
+        eventId: event.id,
       })
 
-      const jiraStarted = overlap.overlapStart.toISOString().replace('Z', '+0000')
-      await addWorklogFn(issueRef, durationSeconds, jiraStarted, comment)
       loggedCount++
     } catch (e) {
       console.error(`[Jira Sync] Failed to log worklog for ${issueRef.domain}|${issueRef.issueKey}`, e)

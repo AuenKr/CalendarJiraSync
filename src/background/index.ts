@@ -13,8 +13,19 @@ import type {
   GetProjectsPayload,
   SyncDataResponse,
 } from '../types/messages'
-import type { DomainSyncFailure, JiraDomainConfig, JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
-import { parseExtensionMetadataFromComment } from '../lib/worklogMetadata'
+import type {
+  DomainSyncFailure,
+  JiraDomainConfig,
+  JiraIssueRef,
+  StoredExtensionWorklogMetadata,
+  SyncedIssueRecord,
+} from '@/types/jira'
+import {
+  getStoredExtensionWorklogKey,
+  getStoredExtensionWorklogs,
+  parseExtensionMetadataFromComment,
+  setStoredExtensionWorklogs,
+} from '../lib/worklogMetadata'
 import { normalizeJiraDomain, parseJiraConfig } from '@/lib/jiraConfig'
 
 interface EnhancedSearchResults extends SearchResults {
@@ -292,10 +303,93 @@ async function getIssueWorklogsInRange(
   return worklogs
 }
 
-async function resetWorklogsForDomain(
+function issueRefStorageKey({ domain, issueKey }: JiraIssueRef): string {
+  return `${normalizeJiraDomain(domain) || domain}|${issueKey}`
+}
+
+function isWorklogMissingError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const typed = error as {
+    status?: number
+    code?: number | string
+    message?: string
+    response?: { status?: number }
+  }
+
+  return typed.status === 404 ||
+    typed.response?.status === 404 ||
+    typed.code === 404 ||
+    typed.code === '404' ||
+    (typeof typed.message === 'string' && typed.message.includes('404'))
+}
+
+async function resetStoredWorklogsForDate(
+  config: JiraRuntimeConfig,
+  storedWorklogs: StoredExtensionWorklogMetadata[],
+  date: string,
+  matchedWorklogKeys: Set<string>,
+  deletedWorklogKeys: Set<string>,
+  removableStoredWorklogKeys: Set<string>,
+  touchedIssueRefs: Set<string>,
+): Promise<{ deletedCount: number; matchedCount: number }> {
+  const configuredDomains = new Set(config.jiraDomains.map(each => each.domain))
+  const clientCache = new Map<string, Version3Client>()
+  let matchedCount = 0
+  let deletedCount = 0
+
+  for (const worklog of storedWorklogs) {
+    if (worklog.date !== date || !configuredDomains.has(worklog.domain)) continue
+
+    const worklogKey = getStoredExtensionWorklogKey(worklog)
+    const issueRef = { domain: worklog.domain, issueKey: worklog.issueKey }
+    touchedIssueRefs.add(issueRefStorageKey(issueRef))
+
+    if (!matchedWorklogKeys.has(worklogKey)) {
+      matchedWorklogKeys.add(worklogKey)
+      matchedCount++
+    }
+
+    try {
+      const client = clientCache.get(worklog.domain) || getClient(config, worklog.domain)
+      clientCache.set(worklog.domain, client)
+
+      await client.issueWorklogs.deleteWorklog({
+        issueIdOrKey: worklog.issueKey,
+        id: worklog.worklogId,
+      })
+
+      if (!deletedWorklogKeys.has(worklogKey)) {
+        deletedWorklogKeys.add(worklogKey)
+        deletedCount++
+      }
+      removableStoredWorklogKeys.add(worklogKey)
+    } catch (e) {
+      if (isWorklogMissingError(e)) {
+        removableStoredWorklogKeys.add(worklogKey)
+        continue
+      }
+
+      console.error(`[Jira Sync] Failed to delete stored worklog ${worklog.worklogId} on ${worklog.domain}/${worklog.issueKey}`, e)
+    }
+  }
+
+  return {
+    deletedCount,
+    matchedCount,
+  }
+}
+
+async function resetLegacyWorklogsForDomain(
   config: JiraRuntimeConfig,
   domainConfig: JiraDomainConfig,
   date: string,
+  matchedWorklogKeys: Set<string>,
+  deletedWorklogKeys: Set<string>,
+  removableStoredWorklogKeys: Set<string>,
+  touchedIssueRefs: Set<string>,
 ): Promise<{ deletedCount: number; matchedCount: number; scannedIssues: number }> {
   const client = getClient(config, domainConfig.domain)
   const { dayStartMs, dayEndMs } = getDayRangeMs(date)
@@ -305,21 +399,42 @@ async function resetWorklogsForDomain(
   let deletedCount = 0
 
   for (const issueKey of issueKeys) {
+    touchedIssueRefs.add(issueRefStorageKey({ domain: domainConfig.domain, issueKey }))
+  }
+
+  for (const issueKey of issueKeys) {
     const issueWorklogs = await getIssueWorklogsInRange(client, issueKey, dayStartMs, dayEndMs)
 
     for (const worklog of issueWorklogs) {
       const meta = parseExtensionMetadataFromComment(worklog.comment)
       if (!meta || meta.date !== date) continue
 
-      matchedCount++
-      if (!worklog.id) continue
+      if (!worklog.id) {
+        matchedCount++
+        continue
+      }
+
+      const worklogKey = getStoredExtensionWorklogKey({
+        domain: domainConfig.domain,
+        issueKey,
+        worklogId: worklog.id,
+      })
+
+      if (!matchedWorklogKeys.has(worklogKey)) {
+        matchedWorklogKeys.add(worklogKey)
+        matchedCount++
+      }
+
+      if (deletedWorklogKeys.has(worklogKey)) continue
 
       try {
         await client.issueWorklogs.deleteWorklog({
           issueIdOrKey: issueKey,
           id: worklog.id,
         })
+        deletedWorklogKeys.add(worklogKey)
         deletedCount++
+        removableStoredWorklogKeys.add(worklogKey)
       } catch (e) {
         console.error(`[Jira Sync] Failed to delete worklog ${worklog.id} on ${domainConfig.domain}/${issueKey}`, e)
       }
@@ -584,13 +699,36 @@ async function handleMessage(request: MessageRequest) {
         throw new Error('Invalid date format, expected YYYY-MM-DD')
       }
 
-      const settled = await Promise.allSettled(
-        config.jiraDomains.map(domainConfig => resetWorklogsForDomain(config, domainConfig, date)),
+      const storedWorklogs = await getStoredExtensionWorklogs()
+      const matchedWorklogKeys = new Set<string>()
+      const deletedWorklogKeys = new Set<string>()
+      const removableStoredWorklogKeys = new Set<string>()
+      const touchedIssueRefs = new Set<string>()
+
+      const storedResult = await resetStoredWorklogsForDate(
+        config,
+        storedWorklogs,
+        date,
+        matchedWorklogKeys,
+        deletedWorklogKeys,
+        removableStoredWorklogKeys,
+        touchedIssueRefs,
       )
 
-      let deletedCount = 0
-      let matchedCount = 0
-      let scannedIssues = 0
+      const settled = await Promise.allSettled(
+        config.jiraDomains.map(domainConfig => resetLegacyWorklogsForDomain(
+          config,
+          domainConfig,
+          date,
+          matchedWorklogKeys,
+          deletedWorklogKeys,
+          removableStoredWorklogKeys,
+          touchedIssueRefs,
+        )),
+      )
+
+      let deletedCount = storedResult.deletedCount
+      let matchedCount = storedResult.matchedCount
       const failedDomains: DomainSyncFailure[] = []
 
       for (let i = 0; i < settled.length; i++) {
@@ -599,7 +737,6 @@ async function handleMessage(request: MessageRequest) {
         if (result.status === 'fulfilled') {
           deletedCount += result.value.deletedCount
           matchedCount += result.value.matchedCount
-          scannedIssues += result.value.scannedIssues
           continue
         }
 
@@ -610,6 +747,14 @@ async function handleMessage(request: MessageRequest) {
         console.error(`[Jira Sync] Failed to reset worklogs for domain ${domain}`, result.reason)
       }
 
+      if (removableStoredWorklogKeys.size > 0) {
+        const nextStoredWorklogs = storedWorklogs.filter(
+          each => !removableStoredWorklogKeys.has(getStoredExtensionWorklogKey(each)),
+        )
+        await setStoredExtensionWorklogs(nextStoredWorklogs)
+      }
+
+      const scannedIssues = touchedIssueRefs.size
       return { deletedCount, matchedCount, scannedIssues, failedDomains }
     }
 
