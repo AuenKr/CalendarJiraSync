@@ -10,6 +10,7 @@ import styles from '../index.css?inline'
 const MOUNT_POINT_ID = 'calendar-jira-sync-root'
 const DOCK_MOUNT_POINT_ID = 'calendar-jira-sync-dock-root'
 const FLOATING_MOUNT_POINT_ID = 'calendar-jira-sync-floating-root'
+const CALENDAR_VIEW_ROUTE_PATTERN = /^\/calendar\/u\/\d+\/r(?:\/(?:(?:day|week|month|schedule|agenda|customday|eventedit)(?:\/.*)?)?)?\/?$/
 let activeContentMount: {
   host: HTMLElement
   reactRoot: ReturnType<typeof ReactDOM.createRoot>
@@ -21,6 +22,10 @@ function isUsableOwner(el: Element | null): el is HTMLElement {
   if (!(el instanceof HTMLElement)) return false
   if (el === document.body || el === document.documentElement) return false
   return true
+}
+
+function isSupportedCalendarRoute(): boolean {
+  return CALENDAR_VIEW_ROUTE_PATTERN.test(window.location.pathname)
 }
 
 function resolveOwnerFromTitleInput(titleInput: HTMLElement): HTMLElement | null {
@@ -185,6 +190,10 @@ function cleanupContentMount() {
 }
 
 function injectApp(modal: Element) {
+  if (!isSupportedCalendarRoute()) {
+    return
+  }
+
   const currentModal = resolveOwningModal(modal)
   if (!currentModal) {
     return
@@ -515,6 +524,13 @@ function updateDockPosition(host: HTMLElement, container: HTMLElement) {
 function ensureDockMount() {
   const existingHost = document.getElementById(DOCK_MOUNT_POINT_ID) as HTMLElement | null
 
+  if (!isSupportedCalendarRoute()) {
+    if (existingHost) {
+      existingHost.style.display = 'none'
+    }
+    return
+  }
+
   if (hasOpenEventOverlay()) {
     if (existingHost) {
       existingHost.style.display = 'none'
@@ -604,6 +620,12 @@ const observer = new MutationObserver((mutations) => {
 observer.observe(document.body, { childList: true, subtree: true })
 
 function ensureMountOnActiveContainers() {
+  if (!isSupportedCalendarRoute()) {
+    cleanupContentMount()
+    ensureDockMount()
+    return
+  }
+
   const candidates = new Set<Element>()
   for (const node of document.querySelectorAll(EVENT_OVERLAY_SELECTOR)) {
     candidates.add(node)
