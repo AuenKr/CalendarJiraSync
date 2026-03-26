@@ -4,7 +4,16 @@ import { RefreshCw, Check, ChevronDown, Loader2, ExternalLink, AlertTriangle, Se
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { searchIssues, getIssue, getTransitions, transitionIssue, getStoredIssues, refreshTaskCacheIfStale, isTaskCacheStale, type JiraTransition } from '../lib/jira'
 import { cn } from '@/lib/utils'
-import { formatDomainDisplayLabel, formatIssueRefLabel, formatLinkedIssueTitle, issueRefEquals, parseLinkedIssueFromText, stripLinkedIssuePrefix } from '@/lib/jiraLink'
+import {
+  formatDomainDisplayLabel,
+  formatIssueRefLabel,
+  formatLinkedIssueTitle,
+  issueRefEquals,
+  issueRefKey,
+  parseLinkedIssueFromText,
+  stripLinkedIssuePrefix,
+  type LinkedIssueLinkMode,
+} from '@/lib/jiraLink'
 import type { JiraIssueRef, SyncedIssueRecord } from '@/types/jira'
 import { getStoredJiraConfig } from '@/lib/jiraConfig'
 
@@ -516,6 +525,7 @@ type KeySource = 'title-input' | 'heading' | 'data-text' | 'none'
 interface LinkedRefResolution {
   ref: JiraIssueRef | null
   reason: 'ambiguous-key' | 'domain-not-configured' | null
+  linkMode: LinkedIssueLinkMode | null
   source: KeySource
   hasAnyText: boolean
   issueKey?: string
@@ -557,15 +567,18 @@ export default function ContentApp({
   const [isFocused, setIsFocused] = useState(titleInput ? titleInput === document.activeElement : false)
   const [linkedIssueRef, setLinkedIssueRef] = useState<JiraIssueRef | null>(null)
   const [linkedIssueReason, setLinkedIssueReason] = useState<'ambiguous-key' | 'domain-not-configured' | null>(null)
+  const [linkedIssueLinkMode, setLinkedIssueLinkMode] = useState<LinkedIssueLinkMode | null>(null)
   const [linkedIssueRequestedDomain, setLinkedIssueRequestedDomain] = useState<string | null>(null)
   const [linkedIssueHintKey, setLinkedIssueHintKey] = useState<string | null>(null)
   const [configuredDomains, setConfiguredDomains] = useState<string[]>([])
+  const [defaultJiraDomain, setDefaultJiraDomain] = useState('')
   const [isConfigReady, setIsConfigReady] = useState(false)
   const [descriptionFocusVisible, setDescriptionFocusVisible] = useState(false)
   const [isCacheRevalidating, setIsCacheRevalidating] = useState(false)
   const [cacheRevalidationFailed, setCacheRevalidationFailed] = useState(false)
   const [suggestionAnchorRect, setSuggestionAnchorRect] = useState<SuggestionAnchorRect | null>(null)
   const [isSuggestionAnchorSettled, setIsSuggestionAnchorSettled] = useState(false)
+  const [fallbackFailedIssueRefKey, setFallbackFailedIssueRefKey] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const logPrefix = '[Jira Sync][ContentApp]'
   const isBubbleView = !!titleEl && !titleInput
@@ -632,11 +645,12 @@ export default function ContentApp({
       const normalized = normalizeLinkedText(candidate)
       if (!normalized) return null
 
-      const parsed = parseLinkedIssueFromText(normalized, configuredDomains)
+      const parsed = parseLinkedIssueFromText(normalized, configuredDomains, defaultJiraDomain)
       if (parsed.ref) {
         return {
           ref: parsed.ref,
           reason: null,
+          linkMode: parsed.linkMode || null,
           source,
           hasAnyText: true,
         }
@@ -646,6 +660,7 @@ export default function ContentApp({
         return {
           ref: null,
           reason: parsed.reason,
+          linkMode: null,
           source,
           hasAnyText: true,
           issueKey: parsed.issueKey,
@@ -681,10 +696,11 @@ export default function ContentApp({
     return {
       ref: null,
       reason: null,
+      linkMode: null,
       source: 'none',
       hasAnyText: !!(inputText || headingText || dataText),
     }
-  }, [configuredDomains, container, titleEl, titleInput])
+  }, [configuredDomains, container, defaultJiraDomain, titleEl, titleInput])
 
   // Update titleEl if prop changes
   useEffect(() => {
@@ -800,6 +816,7 @@ export default function ContentApp({
       })
 
       setLinkedIssueReason(resolution.reason)
+      setLinkedIssueLinkMode(resolution.linkMode)
       setLinkedIssueHintKey(resolution.issueKey || null)
       setLinkedIssueRequestedDomain(resolution.requestedDomain || null)
     }
@@ -846,15 +863,40 @@ export default function ContentApp({
     }
   }, [container, logPrefix, resolveLinkedIssueRef, titleEl, titleInput])
 
+  const isFallbackRelinkRequired = !!(
+    linkedIssueRef &&
+    linkedIssueLinkMode === 'default-fallback' &&
+    fallbackFailedIssueRefKey === issueRefKey(linkedIssueRef)
+  )
+
+  useEffect(() => {
+    if (!linkedIssueRef || linkedIssueLinkMode !== 'default-fallback') {
+      if (fallbackFailedIssueRefKey) {
+        setFallbackFailedIssueRefKey(null)
+      }
+      return
+    }
+
+    const currentIssueRefKey = issueRefKey(linkedIssueRef)
+    if (fallbackFailedIssueRefKey && fallbackFailedIssueRefKey !== currentIssueRefKey) {
+      setFallbackFailedIssueRefKey(null)
+    }
+  }, [fallbackFailedIssueRefKey, linkedIssueLinkMode, linkedIssueRef])
+
   const linkedRefLabel = linkedIssueRef
     ? formatIssueRefLabel(linkedIssueRef, configuredDomains.length)
     : linkedIssueHintKey
 
   // Fetch linked issue details (status)
-  const { data: linkedIssue, refetch: refetchLinkedIssue } = useQuery({
+  const {
+    data: linkedIssue,
+    refetch: refetchLinkedIssue,
+    isError: linkedIssueQueryFailed,
+    isSuccess: linkedIssueQuerySucceeded,
+  } = useQuery({
     queryKey: ['issue', linkedIssueRef?.domain, linkedIssueRef?.issueKey],
     queryFn: () => getIssue(linkedIssueRef!),
-    enabled: !!linkedIssueRef,
+    enabled: !!linkedIssueRef && !isFallbackRelinkRequired,
     staleTime: 1000 * 60 * 5,
   })
 
@@ -882,9 +924,11 @@ export default function ContentApp({
       try {
         const config = await getStoredJiraConfig()
         setConfiguredDomains(config.jiraDomains.map(each => each.domain))
+        setDefaultJiraDomain(config.defaultJiraDomain)
       } catch (e) {
         console.warn(`${logPrefix} Failed to load Jira config`, e)
         setConfiguredDomains([])
+        setDefaultJiraDomain('')
       } finally {
         setIsConfigReady(true)
       }
@@ -986,10 +1030,10 @@ export default function ContentApp({
   }, [isFocused, isSuggestionAnchorSettled, open, updateSuggestionAnchorRect])
 
   // Fetch transitions for linked issue
-  const { data: transitions } = useQuery({
+  const { data: transitions, isError: transitionsQueryFailed } = useQuery({
     queryKey: ['transitions', linkedIssueRef?.domain, linkedIssueRef?.issueKey],
     queryFn: () => getTransitions(linkedIssueRef!),
-    enabled: !!linkedIssueRef,
+    enabled: !!linkedIssueRef && !isFallbackRelinkRequired,
     staleTime: 1000 * 60 * 5,
   })
 
@@ -1001,8 +1045,36 @@ export default function ContentApp({
     onSuccess: () => {
       refetchLinkedIssue()
       queryClient.invalidateQueries({ queryKey: ['transitions', linkedIssueRef?.domain, linkedIssueRef?.issueKey] })
-    }
+    },
+    onError: (error) => {
+      console.warn(`${logPrefix} Failed to transition linked issue`, error)
+      if (linkedIssueRef && linkedIssueLinkMode === 'default-fallback') {
+        setFallbackFailedIssueRefKey(issueRefKey(linkedIssueRef))
+      }
+    },
   })
+
+  useEffect(() => {
+    if (!linkedIssueRef || linkedIssueLinkMode !== 'default-fallback') return
+
+    const currentIssueRefKey = issueRefKey(linkedIssueRef)
+    if (linkedIssueQueryFailed || transitionsQueryFailed || transitionMutation.isError) {
+      setFallbackFailedIssueRefKey(currentIssueRefKey)
+      return
+    }
+
+    if (fallbackFailedIssueRefKey === currentIssueRefKey && linkedIssueQuerySucceeded && !transitionMutation.isError) {
+      setFallbackFailedIssueRefKey(null)
+    }
+  }, [
+    fallbackFailedIssueRefKey,
+    linkedIssueLinkMode,
+    linkedIssueQueryFailed,
+    linkedIssueQuerySucceeded,
+    linkedIssueRef,
+    transitionMutation.isError,
+    transitionsQueryFailed,
+  ])
 
   // Search Queries
   const { data, isLoading: loading } = useQuery({
@@ -1275,15 +1347,13 @@ export default function ContentApp({
       setForceApi(false)
       setOpen(false)
       setDescriptionFocusVisible(false)
+      setFallbackFailedIssueRefKey(null)
 
       // Update Google Calendar Title
       const input = titleInput || document.querySelector('input[aria-label="Add title"], input[aria-label="Title"], input[type="text"][aria-label*="title" i]') as HTMLInputElement
-      const observedDomainCount = new Set((storedIssuesData?.issues || []).map(each => each.domain)).size
-      const domainCountForFormatting = Math.max(configuredDomains.length, observedDomainCount, 1)
       const newTitle = formatLinkedIssueTitle(
         { domain: issue.domain, issueKey },
         issue.issue.fields.summary,
-        domainCountForFormatting,
       )
 
       if (input) {
@@ -1332,7 +1402,7 @@ export default function ContentApp({
 
   return (
     <div className={cn('jira-sync-overlay font-sans text-left', isBubbleView ? 'mt-1 w-fit' : 'relative')}>
-      {linkedIssueRef && !isFullEditView && (
+      {linkedIssueRef && !isFullEditView && !isFallbackRelinkRequired && (
         <div className={cn(isBubbleView ? 'relative inline-flex items-center gap-2' : 'absolute right-0 top-7 z-50 inline-flex items-center gap-2')}>
           <div className="inline-flex items-center gap-2">
             <span className={cn('leading-none whitespace-nowrap text-md text-black dark:text-white')}>
@@ -1420,6 +1490,15 @@ export default function ContentApp({
               <ExternalLink className={cn(isBubbleView ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
             </button>
           )}
+        </div>
+      )}
+
+      {isFallbackRelinkRequired && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-[#f0d5a2] bg-[#fff7e8] px-3 py-1.5 text-xs text-[#9a6511] dark:border-[#5f4a2a] dark:bg-[#352a18] dark:text-[#f2c981]">
+          <AlertTriangle size={12} />
+          <span>
+            Legacy Jira link {linkedRefLabel ? `(${linkedRefLabel}) ` : ''}did not resolve in the default Jira instance. Re-select task.
+          </span>
         </div>
       )}
 

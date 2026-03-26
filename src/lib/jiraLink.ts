@@ -10,17 +10,30 @@ export type LinkedIssueParseReason =
   | 'ambiguous-key'
   | 'domain-not-configured'
 
+export type LinkedIssueLinkMode = 'explicit' | 'default-fallback'
+
 export interface LinkedIssueParseResult {
   ref: JiraIssueRef | null
   reason?: LinkedIssueParseReason
   issueKey?: string
   requestedDomain?: string
+  linkMode?: LinkedIssueLinkMode
 }
 
-export function parseLinkedIssueFromText(text: string, configuredDomains: string[]): LinkedIssueParseResult {
+export function parseLinkedIssueFromText(
+  text: string,
+  configuredDomains: string[],
+  defaultJiraDomain = '',
+): LinkedIssueParseResult {
   const normalizedText = text.trim()
   const normalizedDomains = configuredDomains.map(normalizeJiraDomain).filter(Boolean)
   const uniqueDomains = Array.from(new Set(normalizedDomains))
+  const normalizedDefaultDomain = normalizeJiraDomain(defaultJiraDomain)
+  const resolvedDefaultDomain = normalizedDefaultDomain && uniqueDomains.includes(normalizedDefaultDomain)
+    ? normalizedDefaultDomain
+    : uniqueDomains.length === 1
+      ? uniqueDomains[0]
+      : ''
 
   const explicit = normalizedText.match(MULTI_DOMAIN_LINK_PATTERN)
   if (explicit?.[1] && explicit?.[2]) {
@@ -41,6 +54,7 @@ export function parseLinkedIssueFromText(text: string, configuredDomains: string
 
     return {
       ref: { domain, issueKey },
+      linkMode: 'explicit',
     }
   }
 
@@ -64,6 +78,7 @@ export function parseLinkedIssueFromText(text: string, configuredDomains: string
 
     return {
       ref: { domain, issueKey },
+      linkMode: 'explicit',
     }
   }
 
@@ -73,12 +88,13 @@ export function parseLinkedIssueFromText(text: string, configuredDomains: string
   }
 
   const issueKey = keyOnlyMatch[1]
-  if (uniqueDomains.length === 1) {
+  if (resolvedDefaultDomain) {
     return {
       ref: {
-        domain: uniqueDomains[0],
+        domain: resolvedDefaultDomain,
         issueKey,
       },
+      linkMode: 'default-fallback',
     }
   }
 
@@ -103,12 +119,8 @@ export function stripLinkedIssuePrefix(value: string): string {
     .trim()
 }
 
-export function formatLinkedIssueTitle(issueRef: JiraIssueRef, summary: string, configuredDomainCount: number): string {
-  if (configuredDomainCount > 1) {
-    return `[${issueRef.issueKey}] ${summary} [${issueRef.domain}]`
-  }
-
-  return `[${issueRef.issueKey}] ${summary}`
+export function formatLinkedIssueTitle(issueRef: JiraIssueRef, summary: string): string {
+  return `[${issueRef.issueKey}] ${summary} [${issueRef.domain}]`
 }
 
 export function formatIssueRefLabel(issueRef: JiraIssueRef, configuredDomainCount: number): string {

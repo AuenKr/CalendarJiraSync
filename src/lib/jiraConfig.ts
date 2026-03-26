@@ -2,6 +2,7 @@ import type { JiraDomainConfig } from '@/types/jira'
 
 interface LegacyConfigShape {
   jiraDomain?: string
+  defaultJiraDomain?: string
   selectedProjectKeys?: string[]
   jiraDomains?: Array<{
     domain?: string
@@ -15,6 +16,7 @@ export interface JiraConfigSnapshot {
   email: string
   apiToken: string
   jiraDomains: JiraDomainConfig[]
+  defaultJiraDomain: string
 }
 
 export function normalizeJiraDomain(value: string): string {
@@ -47,6 +49,17 @@ export function normalizeJiraDomains(values: string[]): string[] {
     .filter(Boolean)
 
   return uniqueStringList(normalized)
+}
+
+export function resolveDefaultJiraDomain(domains: string[], candidate?: string): string {
+  const normalizedDomains = normalizeJiraDomains(domains)
+  const normalizedCandidate = normalizeJiraDomain(candidate || '')
+
+  if (normalizedCandidate && normalizedDomains.includes(normalizedCandidate)) {
+    return normalizedCandidate
+  }
+
+  return normalizedDomains[0] || ''
 }
 
 export function normalizeDomainConfigs(values: Array<{ domain?: string; selectedProjectKeys?: string[] }>): JiraDomainConfig[] {
@@ -87,6 +100,7 @@ function toLegacyShape(rawConfig: unknown): LegacyConfigShape {
 
   return {
     jiraDomain: typeof candidate.jiraDomain === 'string' ? candidate.jiraDomain : undefined,
+    defaultJiraDomain: typeof candidate.defaultJiraDomain === 'string' ? candidate.defaultJiraDomain : undefined,
     selectedProjectKeys: Array.isArray(candidate.selectedProjectKeys)
       ? candidate.selectedProjectKeys.filter((item): item is string => typeof item === 'string')
       : undefined,
@@ -104,12 +118,17 @@ export function parseJiraConfig(rawConfig: unknown): JiraConfigSnapshot {
   const email = parsed.email || ''
   const apiToken = parsed.apiToken || ''
 
+  const orderedDomains = normalizeJiraDomains((parsed.jiraDomains || []).map(each => each.domain || ''))
   const normalizedDomainConfigs = normalizeDomainConfigs(parsed.jiraDomains || [])
   if (normalizedDomainConfigs.length > 0) {
     return {
       email,
       apiToken,
       jiraDomains: normalizedDomainConfigs,
+      defaultJiraDomain: resolveDefaultJiraDomain(
+        orderedDomains.length > 0 ? orderedDomains : normalizedDomainConfigs.map(each => each.domain),
+        parsed.defaultJiraDomain,
+      ),
     }
   }
 
@@ -119,6 +138,7 @@ export function parseJiraConfig(rawConfig: unknown): JiraConfigSnapshot {
       email,
       apiToken,
       jiraDomains: [],
+      defaultJiraDomain: '',
     }
   }
 
@@ -129,18 +149,19 @@ export function parseJiraConfig(rawConfig: unknown): JiraConfigSnapshot {
       domain: legacyDomain,
       selectedProjectKeys: uniqueStringList(parsed.selectedProjectKeys || []),
     }],
+    defaultJiraDomain: resolveDefaultJiraDomain([legacyDomain], parsed.defaultJiraDomain || legacyDomain),
   }
 }
 
 export async function getStoredJiraConfig(): Promise<JiraConfigSnapshot> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) {
-    return { email: '', apiToken: '', jiraDomains: [] }
+    return { email: '', apiToken: '', jiraDomains: [], defaultJiraDomain: '' }
   }
 
   const storage = await chrome.storage.local.get('jira-sync-config')
   const raw = storage['jira-sync-config']
   if (!raw) {
-    return { email: '', apiToken: '', jiraDomains: [] }
+    return { email: '', apiToken: '', jiraDomains: [], defaultJiraDomain: '' }
   }
 
   try {
@@ -149,7 +170,7 @@ export async function getStoredJiraConfig(): Promise<JiraConfigSnapshot> {
     }
     return parseJiraConfig(raw)
   } catch {
-    return { email: '', apiToken: '', jiraDomains: [] }
+    return { email: '', apiToken: '', jiraDomains: [], defaultJiraDomain: '' }
   }
 }
 

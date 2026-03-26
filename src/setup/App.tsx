@@ -17,11 +17,12 @@ import { getProjects, syncData } from '@/lib/jira'
 import { useThemePreference } from '@/lib/theme'
 import { useConfigStore } from '@/store/useConfigStore'
 import { useConfigStoreHydrated } from '@/store/useConfigStoreHydrated'
-import { normalizeJiraDomains, normalizeJiraDomain } from '@/lib/jiraConfig'
+import { normalizeJiraDomains, normalizeJiraDomain, resolveDefaultJiraDomain } from '@/lib/jiraConfig'
 
 function App() {
   const {
     jiraDomains,
+    defaultJiraDomain,
     email,
     apiToken,
     themePreference,
@@ -89,6 +90,10 @@ function App() {
   const selectedProjectCount = useMemo(() => {
     return jiraDomains.reduce((count, each) => count + each.selectedProjectKeys.length, 0)
   }, [jiraDomains])
+
+  const resolvedFormDefaultDomain = useMemo(() => {
+    return resolveDefaultJiraDomain(formData.domains, defaultJiraDomain)
+  }, [defaultJiraDomain, formData.domains])
 
   const knownJiraDomains = useMemo(() => {
     const values = [
@@ -183,6 +188,7 @@ function App() {
 
     setConfig({
       jiraDomains: normalizedDomains,
+      defaultJiraDomain: resolveDefaultJiraDomain(normalizedDomains, defaultJiraDomain),
       email: formData.email.trim(),
       apiToken: formData.apiToken.trim(),
     })
@@ -304,23 +310,35 @@ function App() {
                 </label>
 
                 {formData.domains.map((domain, index) => (
-                  <div key={`domain-${index}`} className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      id={`jira-domain-${index}`}
-                      name={`jira-domain-${index}`}
-                      list={`jira-domain-suggestions-${index}`}
-                      value={domain}
-                      onChange={(e) => handleDomainChange(index, e.target.value)}
-                      placeholder="your-company.atlassian.net"
-                      autoComplete="on"
-                      inputMode="url"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      className="w-full rounded-xl border border-[#d7cebf] bg-[#faf7f1] px-4 py-2.5 text-sm text-[#182234] outline-none transition placeholder:text-[#8a90a0] focus:border-[#1d5d8c] focus:bg-white dark:border-[#34425b] dark:bg-[#121927] dark:text-[#e7edf8] dark:placeholder:text-[#76849b] dark:focus:border-[#7eb6e3] dark:focus:bg-[#182235]"
-                      required={index === 0}
-                    />
+                  <div key={`domain-${index}`} className="flex items-end gap-2">
+                    <div className="w-full space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-[#5f6778] dark:text-[#9fb0c7]">
+                          Jira domain {index + 1}
+                        </span>
+                        {(normalizeJiraDomain(domain) === resolvedFormDefaultDomain || (!resolvedFormDefaultDomain && index === 0)) && (
+                          <span className="rounded-full border border-[#cbd8e5] bg-[#eef4fb] px-2 py-0.5 text-[10px] font-semibold text-[#1d5d8c] dark:border-[#35506e] dark:bg-[#1a2c40] dark:text-[#9ec9ea]">
+                            Default Jira instance
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        id={`jira-domain-${index}`}
+                        name={`jira-domain-${index}`}
+                        list={`jira-domain-suggestions-${index}`}
+                        value={domain}
+                        onChange={(e) => handleDomainChange(index, e.target.value)}
+                        placeholder="your-company.atlassian.net"
+                        autoComplete="on"
+                        inputMode="url"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="w-full rounded-xl border border-[#d7cebf] bg-[#faf7f1] px-4 py-2.5 text-sm text-[#182234] outline-none transition placeholder:text-[#8a90a0] focus:border-[#1d5d8c] focus:bg-white dark:border-[#34425b] dark:bg-[#121927] dark:text-[#e7edf8] dark:placeholder:text-[#76849b] dark:focus:border-[#7eb6e3] dark:focus:bg-[#182235]"
+                        required={index === 0}
+                      />
+                    </div>
                     <datalist id={`jira-domain-suggestions-${index}`}>
                       {getDomainSuggestions(domain).map(each => (
                         <option key={`${index}-${each}`} value={each} />

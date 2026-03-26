@@ -63,6 +63,11 @@ async function getConfiguredDomains(): Promise<string[]> {
   return config.jiraDomains.map(each => each.domain)
 }
 
+async function getDefaultJiraDomain(): Promise<string> {
+  const config = await getStoredJiraConfig()
+  return config.defaultJiraDomain
+}
+
 async function isJiraConfigured(): Promise<boolean> {
   const config = await getStoredJiraConfig()
   return hasConfiguredJiraDomains(config)
@@ -114,7 +119,10 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     }
   }
 
-  const configuredDomains = await getConfiguredDomains()
+  const [configuredDomains, defaultJiraDomain] = await Promise.all([
+    getConfiguredDomains(),
+    getDefaultJiraDomain(),
+  ])
   const lastLoggedDate = lastLoggedTime ? new Date(lastLoggedTime) : null
   const uniqueEvents = new Map<string, CalendarEvent>()
   const ambiguousEvents: EventDebugInfo[] = []
@@ -153,7 +161,7 @@ export async function runLogTimeForDate(input: LogTimeRunInput): Promise<LogTime
     const durationSeconds = (overlap.overlapEnd.getTime() - overlap.overlapStart.getTime()) / 1000
     if (durationSeconds <= 0) continue
 
-    const parsedLink = parseLinkedIssueFromText(event.title, configuredDomains)
+    const parsedLink = parseLinkedIssueFromText(event.title, configuredDomains, defaultJiraDomain)
     if (!parsedLink.ref) {
       if (parsedLink.reason === 'ambiguous-key') {
         ambiguousCount++
